@@ -1,0 +1,59 @@
+# Baseline Medium Attack Scenario
+# 3 concurrent attack chains with multi-stage progression
+scenario:
+  name: "baseline_medium"
+  description: "Medium complexity scenario with 3 concurrent attack chains"
+  seed: 42
+  duration_ticks: 10000
+
+attack_chains:
+  - name: "Phishing to Credential Theft to Lateral Movement"
+    id: chain_01
+    phases:
+      - type: phishing
+        start_tick: 500
+        end_tick: 600
+        params:
+          send_rate: 0.6
+          click_rate: 0.15
+
+      - type: credential_stuffing
+        start_tick: 800
+        end_tick: 1200
+        params:
+          attacker_ip: "198.51.100.50"
+          attempts_per_tick: 3
+          success_rate: 0.05
+
+      - type: lateral_movement
+        start_tick: 1500
+        end_tick: 2000
+        params:
+          compromised_user: "admin_compromised"
+
+  - name: "HTTP Exploitation to Privilege Escalation"
+    id: chain_02
+    phases:
+      - type: http_exploit
+        start_tick: 1000
+        end_tick: 1500
+        params:
+          attacker_ip: "198.51.100.75"
+          requests_per_tick: 2
+          target_services: ["Web Server", "HR Portal"]
+
+  - name: "Ransomware Propagation"
+    id: chain_03
+    phases:
+      - type: malicious_link
+        start_tick: 2000
+        end_tick: 2100
+        params:
+          click_rate: 0.20
+
+      - type: ransomware
+        start_tick: 2500
+        end_tick: 3500
+        params:
+          files_per_tick: 5
+          propagation_rate: 0.3

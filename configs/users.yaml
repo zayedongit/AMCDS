@@ -1,0 +1,31 @@
+# User Generation Configuration
+user_generation:
+  total_users: 100
+  department_distribution:
+    IT: 0.15
+    Engineering: 0.30
+    Finance: 0.15
+    HR: 0.10
+    Executive: 0.05
+    Operations: 0.25
+
+  role_distribution:
+    standard: 0.60
+    privileged: 0.20
+    admin: 0.12
+    service-account: 0.08
+
+  behavior_profiles:
+    normal: 0.40
+    early_bird: 0.15
+    night_owl: 0.10
+    heavy_email: 0.20
+    remote: 0.15
+
+  password_policy:
+    min_length: 12
+    require_uppercase: true
+    require_numbers: true
+    require_special: true
+    max_age_days: 90
+    lockout_threshold: 5

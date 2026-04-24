@@ -1,0 +1,58 @@
+# Enterprise Network Configuration
+# Used by EnterpriseTopology for deterministic generation
+
+network:
+  base_domain: "amcds-corp.sim"
+  dns_servers:
+    - "10.1.1.2"
+    - "10.1.1.3"
+
+subnets:
+  - name: "DMZ"
+    cidr: "10.1.1.0/24"
+    vlan_id: 100
+    security_zone: "dmz"
+    department: "IT"
+    firewall_rules:
+      inbound: ["tcp/443", "tcp/80", "tcp/25"]
+      outbound: ["any"]
+
+  - name: "Engineering Network"
+    cidr: "10.1.2.0/24"
+    vlan_id: 101
+    security_zone: "internal"
+    department: "Engineering"
+    firewall_rules:
+      inbound: ["internal"]
+      outbound: ["any"]
+
+  - name: "Finance Network"
+    cidr: "10.1.3.0/24"
+    vlan_id: 102
+    security_zone: "internal"
+    department: "Finance"
+    firewall_rules:
+      inbound: ["internal"]
+      outbound: ["tcp/443", "tcp/80"]
+
+  - name: "HR Network"
+    cidr: "10.1.4.0/24"
+    vlan_id: 103
+    security_zone: "internal"
+    department: "HR"
+    firewall_rules:
+      inbound: ["internal"]
+      outbound: ["tcp/443", "tcp/80"]
+
+  - name: "Executive Network"
+    cidr: "10.1.5.0/24"
+    vlan_id: 104
+    security_zone: "restricted"
+    department: "Executive"
+    firewall_rules:
+      inbound: ["restricted"]
+      outbound: ["tcp/443"]
+
+gateway:
+  ip: "10.1.0.1"
+  type: "core_router"

@@ -1,0 +1,17 @@
+{
+  "topics": [
+    {"name": "telemetry.auth", "partitions": 4, "retention_hours": 24},
+    {"name": "telemetry.network", "partitions": 4, "retention_hours": 24},
+    {"name": "telemetry.endpoint", "partitions": 4, "retention_hours": 24},
+    {"name": "telemetry.email", "partitions": 2, "retention_hours": 24},
+    {"name": "telemetry.http", "partitions": 4, "retention_hours": 24},
+    {"name": "telemetry.file", "partitions": 2, "retention_hours": 24},
+    {"name": "telemetry.process", "partitions": 2, "retention_hours": 24},
+    {"name": "alerts.raw", "partitions": 4, "retention_hours": 48},
+    {"name": "alerts.classified", "partitions": 2, "retention_hours": 48},
+    {"name": "incidents.correlated", "partitions": 2, "retention_hours": 72},
+    {"name": "strategies.proposed", "partitions": 2, "retention_hours": 48},
+    {"name": "strategies.selected", "partitions": 1, "retention_hours": 72},
+    {"name": "system.state", "partitions": 1, "retention_hours": 24}
+  ]
+}

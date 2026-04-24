@@ -1,0 +1,93 @@
+# Enterprise Services Configuration
+services:
+  - name: "Active Directory"
+    type: identity
+    ports: [389, 636, 88]
+    criticality: 1.0
+    sla_target: 99.99
+    revenue_per_minute: 500.0
+    department: IT
+    dependencies: []
+
+  - name: "Email Server"
+    type: email
+    ports: [25, 143, 993, 587]
+    criticality: 0.9
+    sla_target: 99.9
+    revenue_per_minute: 100.0
+    department: IT
+    dependencies: ["Active Directory", "DNS Server"]
+
+  - name: "Web Server"
+    type: web
+    ports: [80, 443]
+    criticality: 0.8
+    sla_target: 99.9
+    revenue_per_minute: 200.0
+    department: IT
+    public_facing: true
+    dependencies: ["DNS Server", "Database Server"]
+
+  - name: "File Server"
+    type: storage
+    ports: [445, 139]
+    criticality: 0.7
+    sla_target: 99.5
+    revenue_per_minute: 50.0
+    department: IT
+    dependencies: ["Active Directory"]
+
+  - name: "Database Server"
+    type: database
+    ports: [5432, 3306]
+    criticality: 0.95
+    sla_target: 99.99
+    revenue_per_minute: 400.0
+    department: Engineering
+    dependencies: ["DNS Server"]
+
+  - name: "DNS Server"
+    type: network
+    ports: [53]
+    criticality: 1.0
+    sla_target: 99.99
+    revenue_per_minute: 300.0
+    department: IT
+    dependencies: []
+
+  - name: "VPN Gateway"
+    type: network
+    ports: [1194, 443]
+    criticality: 0.8
+    sla_target: 99.5
+    revenue_per_minute: 80.0
+    department: IT
+    public_facing: true
+    dependencies: ["Active Directory", "DNS Server"]
+
+  - name: "HR Portal"
+    type: web_app
+    ports: [8080]
+    criticality: 0.5
+    sla_target: 99.0
+    revenue_per_minute: 20.0
+    department: HR
+    dependencies: ["Active Directory", "Database Server", "Web Server"]
+
+  - name: "Finance App"
+    type: web_app
+    ports: [8443]
+    criticality: 0.85
+    sla_target: 99.9
+    revenue_per_minute: 350.0
+    department: Finance
+    dependencies: ["Active Directory", "Database Server"]
+
+  - name: "Monitoring"
+    type: monitoring
+    ports: [9090, 3000]
+    criticality: 0.7
+    sla_target: 99.5
+    revenue_per_minute: 10.0
+    department: IT
+    dependencies: ["DNS Server"]

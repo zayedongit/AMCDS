@@ -1,0 +1,50 @@
+# Agent Configuration
+agents:
+  identity_agent:
+    enabled: true
+    topics: ["telemetry.auth", "telemetry.email"]
+    thresholds:
+      failed_login_limit: 5
+      failed_login_window_sec: 300
+      credential_stuffing_users: 10
+      unusual_hour_start: 0
+      unusual_hour_end: 5
+
+  network_agent:
+    enabled: true
+    topics: ["telemetry.network", "telemetry.http"]
+    thresholds:
+      port_scan_limit: 10
+      high_volume_bytes: 10000000
+
+  endpoint_agent:
+    enabled: true
+    topics: ["telemetry.endpoint", "telemetry.process"]
+    thresholds:
+      encryption_burst_limit: 5
+      encryption_burst_window_sec: 60
+
+  data_agent:
+    enabled: true
+    topics: ["telemetry.file"]
+    thresholds:
+      bulk_download_limit: 8
+      bulk_download_window_sec: 120
+
+  classifier_agent:
+    enabled: true
+    topics: ["alerts.raw"]
+    model:
+      type: "mlp"
+      hidden_layers: [32, 16]
+      training_samples: 2000
+      epochs: 50
+
+  business_agent:
+    enabled: true
+    topics: ["incidents.correlated"]
+
+  coordinator_agent:
+    enabled: true
+    topics: ["alerts.classified", "strategies.proposed"]
+    correlation_window_sec: 300
