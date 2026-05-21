@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project-specific
+results/*.json
+results/*.png
+!results/.gitkeep
+data/*.csv
+!data/sample_*.csv
+*.log
+.env
+
+# Large training data — keep out of git (download via README)
+malicious_phish.csv
+https-detector/Archive.zip
+https-detector/src/server.log
+
+# NOTE: https-detector/src/model.pkl (~43MB) IS included so the demo runs
+# out of the box without retraining. To regenerate, see README.
+
+# BMAD scaffolding (not part of AMCDS)
+_bmad/
+_bmad-output/
+.agent/

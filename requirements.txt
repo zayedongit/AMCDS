@@ -1,0 +1,29 @@
+# Core
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+joblib>=1.3
+
+# Classical optimization
+ortools>=9.7
+
+# Quantum-style optimization (runs locally, no API key)
+dwave-neal>=0.6.0
+dimod>=0.12
+
+# Graph + network
+networkx>=3.0
+
+# URL feature extraction (used by existing https-detector)
+tldextract>=3.4
+
+# API / demo serving
+fastapi>=0.100
+uvicorn>=0.23
+pydantic>=2.0
+
+# Visualization for plots saved to results/
+matplotlib>=3.7
+
+# CLI niceness
+rich>=13.0
