@@ -1,0 +1,19 @@
+# Minimal Replay Test Scenario
+# Used for deterministic replay validation
+scenario:
+  name: "replay_test"
+  description: "Minimal deterministic scenario for replay validation"
+  seed: 42
+  duration_ticks: 500
+
+attack_chains:
+  - name: "Simple Credential Attack"
+    id: replay_chain_01
+    phases:
+      - type: credential_stuffing
+        start_tick: 100
+        end_tick: 200
+        params:
+          attacker_ip: "198.51.100.50"
+          attempts_per_tick: 2
+          success_rate: 0.10

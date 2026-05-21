@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+LABEL maintainer="AMCDS Contributors"
+LABEL description="AMCDS Attack Simulation Engine"
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY attack_engine/ ./attack_engine/
+COPY simulation/telemetry_engine/ ./simulation/telemetry_engine/
+COPY simulation/enterprise_simulator/ ./simulation/enterprise_simulator/
+COPY messaging/ ./messaging/
+COPY configs/ ./configs/
+COPY setup.py .
+
+RUN pip install -e .
+
+CMD ["python", "-m", "attack_engine.main"]

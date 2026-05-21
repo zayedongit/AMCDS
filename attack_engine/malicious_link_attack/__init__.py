@@ -1,0 +1,1 @@
+"""Malicious link attack init."""

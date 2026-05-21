@@ -1,0 +1,1 @@
+"""Credential attack init."""
