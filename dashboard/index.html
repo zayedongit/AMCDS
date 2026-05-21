@@ -3,190 +3,666 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AMCDS — Live Containment Dashboard</title>
+<title>AMCDS — Live Containment Theater</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
-  :root {
-    --bg:#0b1020; --panel:#101a35; --panel-2:#16234a; --line:#23335f;
-    --text:#e6edf7; --muted:#8b9bbf; --accent:#6dd3ff; --green:#46d39a;
-    --amber:#ffc857; --red:#ff6b6b; --pii:#c084fc;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,Inter,Segoe UI,Roboto,sans-serif}
-  header{padding:18px 28px;border-bottom:1px solid var(--line);
-    background:linear-gradient(180deg,#0e1530,transparent)}
-  header h1{margin:0;font-size:20px;letter-spacing:.2px}
-  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
-  .wrap{padding:18px 28px;display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-  .card h3{margin:0 0 8px;font-size:13px;letter-spacing:.4px;color:var(--muted);
-    text-transform:uppercase}
-  .col-12{grid-column:span 12}
-  .col-8{grid-column:span 8}
-  .col-7{grid-column:span 7}
-  .col-6{grid-column:span 6}
-  .col-5{grid-column:span 5}
-  .col-4{grid-column:span 4}
-  .col-3{grid-column:span 3}
-  .kpi{display:flex;flex-direction:column;align-items:flex-start}
-  .kpi .v{font-size:24px;font-weight:600;margin-top:2px}
-  .kpi .sub{font-size:11px;color:var(--muted)}
-  .good{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)}
-  select,button{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
-    border-radius:6px;padding:6px 10px;font:13px inherit}
-  button{cursor:pointer}
-  button:hover{background:#1c2c5b}
-  svg.net{width:100%;height:420px;background:#0a1228;border-radius:8px}
-  .node{stroke:#0a1228;stroke-width:1.5px;cursor:pointer}
-  .node-label{font-size:9px;fill:var(--muted);pointer-events:none}
-  .edge{stroke:#23335f;stroke-width:1px;opacity:.6}
-  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);margin-top:8px}
-  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:4px}
-  .phase{border-left:3px solid var(--line);padding:8px 12px;margin:8px 0;background:#0e1735;border-radius:0 8px 8px 0}
-  .phase.active{border-color:var(--accent)}
-  .phase h4{margin:0 0 4px;font-size:12px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
-  .agent{border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;background:#0c1530}
-  .agent .name{font-weight:600;font-size:13px}
-  .agent .tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px}
-  .tag.id{background:#1d3f78;color:#9ccaff}
-  .tag.nw{background:#1c5b46;color:#b3f0d2}
-  .tag.dt{background:#5a2e6f;color:#e0c4f7}
-  .tag.ep{background:#7a4d1e;color:#fcd9a8}
-  .tag.bi{background:#771f3e;color:#fbb5ce}
-  .agent .reason{font-size:12px;color:var(--muted);margin-top:4px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin:2px 3px 2px 0;background:#13224a;color:#cfdcff;border:1px solid #1f3261}
-  .pill.iso{background:#5a1818;color:#ffd9d9;border-color:#7a2424}
-  .pill.veto{background:#1a3a1a;color:#bcf0c8;border-color:#22581d}
-  .scrolls{max-height:520px;overflow-y:auto;padding-right:6px}
-  .stat-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #1c2a55}
-  .stat-row:last-child{border:0}
-  .stat-row .label{color:var(--muted)}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
-  tr:hover td{background:#0e1735}
-  .small{font-size:11px;color:var(--muted)}
-  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .err{color:#ff9b9b}
-  canvas{max-width:100%}
+/* ============================================================
+   CYBER-DEFENSE DARK THEME
+   ============================================================ */
+:root {
+  --bg-0: #02040a;
+  --bg-1: #06091a;
+  --bg-2: #0b1530;
+  --panel: rgba(11, 18, 41, 0.78);
+  --panel-edge: rgba(0, 217, 255, 0.18);
+  --line: #1e2b4d;
+  --accent: #00d9ff;
+  --accent-2: #5d7eff;
+  --red: #ff3860;
+  --red-glow: rgba(255, 56, 96, 0.6);
+  --amber: #ffc857;
+  --amber-glow: rgba(255, 200, 87, 0.55);
+  --green: #28e3a0;
+  --green-glow: rgba(40, 227, 160, 0.55);
+  --purple: #c084fc;
+  --text: #e2e8f5;
+  --muted: #6b7a99;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  background: radial-gradient(ellipse 80% 60% at 50% -10%, var(--bg-2), var(--bg-0) 65%);
+  color: var(--text);
+  font-family: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-x: hidden;
+}
+/* Faint scanlines / grid */
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(0,217,255,0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,217,255,0.022) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(ellipse at 80% 10%, rgba(93,126,255,0.05), transparent 50%),
+    radial-gradient(ellipse at 10% 90%, rgba(0,217,255,0.04), transparent 50%);
+}
+
+/* ============================================================
+   TOPBAR
+   ============================================================ */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px;
+  background: linear-gradient(180deg, rgba(11,18,41,0.92), rgba(11,18,41,0.55));
+  border-bottom: 1px solid var(--panel-edge);
+  backdrop-filter: blur(10px);
+}
+.brand h1 {
+  margin: 0; font-size: 19px; letter-spacing: 3px; font-weight: 700;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 30px rgba(0, 217, 255, 0.25);
+}
+.brand p {
+  margin: 2px 0 0; font-size: 10px; color: var(--muted);
+  letter-spacing: 2px; text-transform: uppercase;
+}
+
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ctrl-btn, .ctrl-select {
+  background: rgba(0, 217, 255, 0.06);
+  color: var(--accent);
+  border: 1px solid rgba(0, 217, 255, 0.28);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit; font-size: 11px; letter-spacing: 1.2px;
+  cursor: pointer; transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+.ctrl-btn:hover, .ctrl-select:hover {
+  background: rgba(0, 217, 255, 0.16);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 217, 255, 0.18);
+}
+.ctrl-btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: var(--bg-0); font-weight: 700; border-color: transparent;
+}
+.ctrl-btn.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 217, 255, 0.35); }
+.ctrl-btn.danger { color: var(--red); border-color: rgba(255, 56, 96, 0.3); background: rgba(255, 56, 96, 0.08); }
+.ctrl-select { padding-right: 22px; background-color: rgba(11,18,41,0.7); color: var(--text); }
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: rgba(40, 227, 160, 0.1);
+  border: 1px solid rgba(40, 227, 160, 0.3);
+  border-radius: 20px;
+  font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+  transition: all 0.3s;
+}
+.status-pill .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 10px var(--green-glow);
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+.status-pill.alert {
+  background: rgba(255, 56, 96, 0.12);
+  border-color: rgba(255, 56, 96, 0.45);
+  color: var(--red);
+}
+.status-pill.alert .dot { background: var(--red); box-shadow: 0 0 10px var(--red-glow); }
+.status-pill.busy {
+  background: rgba(255, 200, 87, 0.12);
+  border-color: rgba(255, 200, 87, 0.45);
+  color: var(--amber);
+}
+.status-pill.busy .dot { background: var(--amber); box-shadow: 0 0 10px var(--amber-glow); }
+@keyframes status-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
+
+/* ============================================================
+   GRID LAYOUT
+   ============================================================ */
+.grid {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  grid-template-rows: minmax(540px, 64vh) auto auto;
+  gap: 14px; padding: 14px 24px 24px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  position: relative;
+}
+.panel-title {
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 10px;
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+}
+.panel-title::before {
+  content: ''; width: 3px; height: 12px; background: var(--accent);
+  border-radius: 2px; box-shadow: 0 0 8px var(--accent);
+}
+.panel-title .count {
+  margin-left: auto; font-size: 10px; color: var(--muted);
+  letter-spacing: 1px;
+}
+
+/* NETWORK PANEL */
+.net-panel { grid-column: 1; grid-row: 1; padding-bottom: 8px; }
+#network-svg {
+  display: block; width: 100%; height: calc(64vh - 100px); min-height: 460px;
+  background: radial-gradient(circle at 50% 50%, rgba(11,18,41,0.5), transparent 70%);
+}
+.net-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 6px; flex-wrap: wrap; gap: 8px;
+}
+.net-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
+.net-legend .dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+  box-shadow: 0 0 4px currentColor;
+}
+.net-summary {
+  font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.net-summary b { color: var(--text); }
+
+/* AGENTS PANEL */
+.agents-panel {
+  grid-column: 2; grid-row: 1;
+  overflow-y: auto; max-height: calc(64vh);
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent;
+}
+.agents-panel::-webkit-scrollbar { width: 6px; }
+.agents-panel::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+
+.agent-card {
+  border: 1px solid rgba(0, 217, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: rgba(6, 9, 26, 0.6);
+  transition: all 0.45s cubic-bezier(.2,.7,.3,1);
+  position: relative; overflow: hidden;
+}
+.agent-card::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent); opacity: 0;
+  transition: opacity 0.4s;
+}
+.agent-card.active {
+  border-color: var(--accent);
+  background: rgba(0, 217, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(0, 217, 255, 0.2),
+              0 0 28px rgba(0, 217, 255, 0.15);
+  transform: translateX(2px);
+}
+.agent-card.active::before { opacity: 1; box-shadow: 0 0 12px var(--accent); }
+.agent-card.business::before { background: var(--amber); }
+.agent-card.business.active {
+  border-color: var(--amber);
+  background: rgba(255, 200, 87, 0.05);
+  box-shadow: 0 0 0 1px rgba(255, 200, 87, 0.2),
+              0 0 28px rgba(255, 200, 87, 0.15);
+}
+.agent-card.business.active::before { box-shadow: 0 0 12px var(--amber); }
+.agent-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.agent-head .icon { font-size: 16px; margin-right: 7px; vertical-align: middle; }
+.agent-head .name {
+  font-weight: 600; font-size: 12px; letter-spacing: 0.6px; vertical-align: middle;
+}
+.agent-card.business .name { color: var(--amber); }
+.conf-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.conf-pct {
+  font-size: 10px; color: var(--muted);
+  font-variant-numeric: tabular-nums; min-width: 32px; text-align: right;
+}
+.conf-bar {
+  flex: 1; height: 3px;
+  background: rgba(0, 217, 255, 0.08); border-radius: 2px; overflow: hidden;
+}
+.conf-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  width: 0%;
+  transition: width 0.7s cubic-bezier(.2,.7,.3,1);
+  box-shadow: 0 0 8px var(--accent);
+}
+.agent-card.business .conf-bar-fill {
+  background: linear-gradient(90deg, var(--amber), #ff9e3d);
+  box-shadow: 0 0 8px var(--amber);
+}
+.agent-reason {
+  font-size: 11px; color: var(--muted); line-height: 1.55;
+  min-height: 30px;
+}
+.agent-reason em { color: var(--text); font-style: normal; }
+.agent-card .ipills {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.ipill {
+  font-size: 10px; padding: 1px 6px;
+  background: rgba(255, 200, 87, 0.12); color: var(--amber);
+  border: 1px solid rgba(255, 200, 87, 0.25); border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* TIMELINE PANEL */
+.timeline-panel { grid-column: 1; grid-row: 2; }
+.timeline-bar-wrap {
+  position: relative; margin: 6px 0 14px;
+}
+.timeline-bar {
+  position: relative; height: 36px;
+  background: linear-gradient(180deg, rgba(6,9,26,0.9), rgba(6,9,26,0.6));
+  border: 1px solid rgba(0, 217, 255, 0.1);
+  border-radius: 6px; overflow: hidden;
+}
+.timeline-progress {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(0,217,255,0.25), rgba(93,126,255,0.4));
+  border-right: 2px solid var(--accent);
+  width: 0%;
+  box-shadow: 4px 0 16px rgba(0, 217, 255, 0.5);
+  transition: width 0.05s linear;
+}
+.timeline-time {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  right: 10px; font-size: 10px; color: var(--muted);
+  font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  z-index: 2;
+}
+.timeline-time .now { color: var(--accent); }
+
+.event-log {
+  max-height: 240px; overflow-y: auto;
+  padding: 6px; background: rgba(2,4,10,0.55);
+  border: 1px solid rgba(0,217,255,0.08);
+  border-radius: 6px;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent;
+}
+.event-log::-webkit-scrollbar { width: 6px; }
+.event-log::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+
+.event-entry {
+  display: grid; grid-template-columns: 70px 1fr; gap: 12px;
+  padding: 5px 8px; margin: 1px 0;
+  border-left: 2px solid transparent;
+  animation: slide-in 0.25s ease-out;
+  font-size: 11px;
+}
+.event-entry .time { color: var(--accent); font-variant-numeric: tabular-nums; }
+.event-entry .msg { color: var(--text); word-break: break-word; }
+.event-entry.attack { border-left-color: var(--red); }
+.event-entry.attack .time { color: var(--red); }
+.event-entry.agent { border-left-color: var(--accent-2); }
+.event-entry.veto { border-left-color: var(--amber); }
+.event-entry.veto .time { color: var(--amber); }
+.event-entry.solver { border-left-color: var(--green); }
+.event-entry.solver .time { color: var(--green); }
+.event-entry.isolate { border-left-color: var(--amber); }
+.event-entry.banner { border-left-color: var(--accent); background: rgba(0,217,255,0.05); }
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* METRICS PANEL */
+.metrics-panel { grid-column: 2; grid-row: 2; }
+.metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kpi {
+  background: rgba(6,9,26,0.6);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px; padding: 12px;
+  position: relative; overflow: hidden;
+}
+.kpi::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent);
+}
+.kpi.red::before    { background: var(--red);    box-shadow: 0 0 8px var(--red); }
+.kpi.amber::before  { background: var(--amber);  box-shadow: 0 0 8px var(--amber); }
+.kpi.green::before  { background: var(--green);  box-shadow: 0 0 8px var(--green); }
+.kpi.purple::before { background: var(--purple); box-shadow: 0 0 8px var(--purple); }
+.kpi .label {
+  font-size: 9px; color: var(--muted); letter-spacing: 1.5px;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.kpi .value {
+  font-size: 22px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1; transition: color 0.3s;
+}
+.kpi.red .value   { color: var(--red); }
+.kpi.amber .value { color: var(--amber); }
+.kpi.green .value { color: var(--green); }
+.kpi .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.kpi.flash { animation: kpi-flash 0.6s ease-out; }
+@keyframes kpi-flash {
+  0% { box-shadow: 0 0 0 0 currentColor; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* SCENARIO INFO */
+.scn-info {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 12px;
+  font-size: 11px; margin-top: 14px;
+}
+.scn-info .lbl { color: var(--muted); letter-spacing: 0.5px; }
+.scn-info .val { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* BENCHMARK PANEL */
+.bench-panel { grid-column: 1 / -1; grid-row: 3; }
+.bench-strats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+.strat-card {
+  border: 1px solid var(--panel-edge); border-radius: 8px; padding: 14px;
+  background: rgba(6,9,26,0.6);
+  position: relative; transition: all 0.4s;
+}
+.strat-card.winner {
+  border-color: var(--green);
+  background: linear-gradient(135deg, rgba(40,227,160,0.08), rgba(6,9,26,0.6));
+  box-shadow: 0 0 24px rgba(40,227,160,0.12);
+}
+.strat-card.winner::after {
+  content: '★ OPTIMAL'; position: absolute; top: 10px; right: 12px;
+  font-size: 9px; letter-spacing: 1.5px; color: var(--green); font-weight: 700;
+}
+.strat-card.loser { opacity: 0.65; }
+.strat-card h4 {
+  margin: 0 0 10px; font-size: 11px; letter-spacing: 1.5px;
+  color: var(--accent); font-weight: 700;
+}
+.strat-card.winner h4 { color: var(--green); }
+.strat-row {
+  display: flex; justify-content: space-between; padding: 4px 0;
+  border-bottom: 1px dashed rgba(0,217,255,0.05);
+  font-size: 11px;
+}
+.strat-row:last-child { border-bottom: 0; }
+.strat-row .l { color: var(--muted); }
+.strat-row .v { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.bench-headline {
+  margin: 10px 0;
+  text-align: center;
+  font-size: 14px; color: var(--green);
+  letter-spacing: 1px;
+}
+.bench-headline b { font-size: 22px; }
+
+/* NETWORK NODE STYLES */
+.node-host {
+  transition: fill 0.5s ease, opacity 0.5s ease;
+  cursor: pointer;
+}
+.node-label {
+  fill: var(--muted); font-size: 9px;
+  font-family: inherit; pointer-events: none;
+  text-anchor: middle;
+}
+.node-host.infected ~ text { fill: var(--red); }
+.node-host.isolated ~ text { fill: var(--amber); opacity: 0.55; }
+
+.pulse-ring {
+  fill: none; stroke: var(--red); stroke-width: 2;
+  opacity: 0;
+}
+
+.link-line { transition: opacity 0.7s, stroke 0.7s, stroke-dasharray 0.7s; }
+.link-line.dimmed { opacity: 0.05; stroke-dasharray: 2,3; }
+
+/* PHASE BANNER */
+.phase-banner {
+  position: absolute; top: 50px; left: 50%; transform: translateX(-50%) translateY(-6px);
+  padding: 8px 20px; border-radius: 6px;
+  background: rgba(0,217,255,0.1);
+  border: 1px solid rgba(0,217,255,0.5);
+  color: var(--accent);
+  font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase;
+  font-weight: 700;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 30px rgba(0,217,255,0.3);
+  opacity: 0; transition: opacity 0.4s, transform 0.4s;
+  pointer-events: none; z-index: 5;
+  white-space: nowrap;
+}
+.phase-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.phase-banner.attack {
+  background: rgba(255,56,96,0.12);
+  border-color: rgba(255,56,96,0.6);
+  color: var(--red);
+  box-shadow: 0 0 30px rgba(255,56,96,0.4);
+}
+.phase-banner.success {
+  background: rgba(40,227,160,0.12);
+  border-color: rgba(40,227,160,0.6);
+  color: var(--green);
+  box-shadow: 0 0 30px rgba(40,227,160,0.4);
+}
+.phase-banner .sub {
+  display: block;
+  font-size: 9px; opacity: 0.7;
+  letter-spacing: 1.5px; margin-top: 3px;
+  text-transform: none;
+}
+
+/* ERROR / LOADING */
+.full-msg {
+  padding: 32px; margin: 32px auto; max-width: 700px;
+  text-align: center; color: var(--muted); font-size: 13px;
+}
+.full-msg.err {
+  border: 1px solid rgba(255,56,96,0.3);
+  background: rgba(255,56,96,0.05);
+  border-radius: 8px; color: #ffb4c0;
+}
+.full-msg code {
+  background: rgba(0,217,255,0.08); color: var(--accent);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: 1fr; }
+  .net-panel { grid-column: 1; grid-row: 1; }
+  .agents-panel { grid-column: 1; grid-row: 2; max-height: 400px; }
+  .timeline-panel { grid-column: 1; grid-row: 3; }
+  .metrics-panel { grid-column: 1; grid-row: 4; }
+  .bench-panel { grid-column: 1; grid-row: 5; }
+  .bench-strats { grid-template-columns: 1fr 1fr; }
+}
 </style>
 </head>
 <body>
 
-<header>
-  <div class="row" style="justify-content:space-between">
-    <div>
-      <h1>AMCDS — Autonomous Multi-Agent Cyber Defense System</h1>
-      <p>Agentic AI architecture with quantum-accelerated containment optimization — Unisys Innovation Program 2026 prototype</p>
-    </div>
-    <div class="row">
-      <select id="scenarioSel"></select>
-      <button id="reloadBtn">Reload report</button>
-    </div>
+<div class="topbar">
+  <div class="brand">
+    <h1>AMCDS</h1>
+    <p>Autonomous Multi-Agent Cyber Defense · Live Containment Theater</p>
   </div>
-</header>
+  <div class="controls">
+    <span class="status-pill" id="statusPill">
+      <span class="dot"></span><span id="statusText">Initializing</span>
+    </span>
+    <select id="scenarioSel" class="ctrl-select"></select>
+    <button id="playBtn" class="ctrl-btn primary">▶ Play</button>
+    <button id="resetBtn" class="ctrl-btn">⟲ Reset</button>
+    <select id="speedSel" class="ctrl-select" title="Playback speed">
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+    </select>
+    <button id="regenBtn" class="ctrl-btn">↻ New data</button>
+  </div>
+</div>
 
-<div id="loading" style="padding:24px 28px;color:var(--muted)">Loading <code>../results/demo_report.json</code> …</div>
-<div id="errorBox" style="padding:18px 28px;display:none" class="err"></div>
+<div id="boot" class="full-msg">Loading <code>/api/report</code> …</div>
+<div id="err"  class="full-msg err" style="display:none"></div>
 
-<div class="wrap" id="main" style="display:none">
+<div class="grid" id="main" style="display:none">
 
-  <!-- KPI row -->
-  <div class="card col-3 kpi">
-    <h3>Headline</h3>
-    <div id="kpiHeadline" class="v good">—</div>
-    <div class="sub">unnecessary isolation reduction<br>vs aggressive baseline</div>
-  </div>
-  <div class="card col-3 kpi">
-    <h3>Negotiation time</h3>
-    <div id="kpiNegoTime" class="v">—</div>
-    <div class="sub">5-phase protocol, end-to-end</div>
-  </div>
-  <div class="card col-3 kpi">
-    <h3>Classical solver</h3>
-    <div id="kpiClassical" class="v">—</div>
-    <div class="sub">Google OR-Tools CP-SAT</div>
-  </div>
-  <div class="card col-3 kpi">
-    <h3>Quantum-style solver</h3>
-    <div id="kpiQuantum" class="v">—</div>
-    <div class="sub">D-Wave simulated annealer</div>
-  </div>
-
-  <!-- Network viz + scenario card -->
-  <div class="card col-7">
-    <h3>Enterprise network — selected scenario</h3>
-    <svg class="net" id="net"></svg>
-    <div class="legend">
-      <span><span class="dot" style="background:#46d39a"></span>healthy</span>
-      <span><span class="dot" style="background:#ff6b6b"></span>infected (seed)</span>
-      <span><span class="dot" style="background:#ffc857"></span>isolated by AMCDS</span>
-      <span><span class="dot" style="background:#c084fc"></span>contains PII</span>
-      <span class="small">gold-tier hosts have a thicker ring</span>
+  <!-- LIVE NETWORK -->
+  <div class="panel net-panel">
+    <h3 class="panel-title">Enterprise Network — Real-time</h3>
+    <div id="phaseBanner" class="phase-banner"></div>
+    <svg id="network-svg"></svg>
+    <div class="net-footer">
+      <div class="net-legend">
+        <span style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>Healthy</span>
+        <span style="color:var(--red)"><span class="dot" style="background:var(--red)"></span>Infected</span>
+        <span style="color:var(--amber)"><span class="dot" style="background:var(--amber)"></span>Isolated</span>
+        <span style="color:var(--purple)"><span class="dot" style="background:var(--purple)"></span>PII data</span>
+        <span style="color:var(--amber)"><span style="display:inline-block;width:8px;height:8px;border:2px solid var(--amber);border-radius:50%;margin-right:4px;vertical-align:middle"></span>Gold SLA</span>
+      </div>
+      <div class="net-summary" id="netSummary"></div>
     </div>
   </div>
 
-  <div class="card col-5">
-    <h3>Scenario detail</h3>
-    <div id="scenarioInfo"></div>
-    <h3 style="margin-top:14px">Solver comparison</h3>
-    <table id="solverTable">
-      <thead><tr><th></th><th>Hosts isolated</th><th>₹/hr lost</th><th>Time</th></tr></thead>
-      <tbody></tbody>
-    </table>
+  <!-- AGENTS -->
+  <div class="panel agents-panel">
+    <h3 class="panel-title">Specialist Agents <span class="count" id="agentsCount">5 active</span></h3>
+    <div id="agents-list"></div>
   </div>
 
-  <!-- Negotiation log -->
-  <div class="card col-7">
-    <h3>Agent negotiation log — 5 phases</h3>
-    <div id="negotiation" class="scrolls"></div>
+  <!-- TIMELINE -->
+  <div class="panel timeline-panel">
+    <h3 class="panel-title">
+      Containment Timeline
+      <span class="count" id="phaseLabel">awaiting attack</span>
+    </h3>
+    <div class="timeline-bar-wrap">
+      <div class="timeline-bar">
+        <div class="timeline-progress" id="timelineProgress"></div>
+        <div class="timeline-time"><span class="now" id="tNow">00.0</span> / <span id="tTotal">00.0</span>s</div>
+      </div>
+    </div>
+    <div class="event-log" id="eventLog"></div>
   </div>
 
-  <div class="card col-5">
-    <h3>Benchmark — AMCDS vs baselines</h3>
-    <canvas id="benchChart" height="220"></canvas>
-    <div class="small" style="margin-top:8px" id="benchSub"></div>
+  <!-- METRICS -->
+  <div class="panel metrics-panel">
+    <h3 class="panel-title">Live Metrics</h3>
+    <div class="metric-grid">
+      <div class="kpi red" id="kpiInfectedCard">
+        <div class="label">Infected</div>
+        <div class="value" id="kpi-infected">0</div>
+        <div class="sub" id="kpi-infected-sub">hosts compromised</div>
+      </div>
+      <div class="kpi amber" id="kpiIsolatedCard">
+        <div class="label">Isolated</div>
+        <div class="value" id="kpi-isolated">0</div>
+        <div class="sub">containment actions</div>
+      </div>
+      <div class="kpi green" id="kpiSavedCard">
+        <div class="label">₹ Saved / hr</div>
+        <div class="value" id="kpi-saved">₹0L</div>
+        <div class="sub">vs aggressive baseline</div>
+      </div>
+      <div class="kpi purple" id="kpiSlaCard">
+        <div class="label">SLA Breaches</div>
+        <div class="value" id="kpi-sla">0</div>
+        <div class="sub">gold-tier services</div>
+      </div>
+    </div>
+    <div class="scn-info" id="scnInfo"></div>
   </div>
 
-  <!-- Benchmark table -->
-  <div class="card col-12">
-    <h3>Benchmark summary across all scenarios</h3>
-    <table id="benchTable">
-      <thead>
-        <tr>
-          <th>Strategy</th><th>n</th><th>Avg unnecessary isolation</th>
-          <th>Avg residual risk</th><th>Avg ₹/hr cost</th>
-          <th>Avg SLA breaches</th><th>Avg time</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+  <!-- BENCHMARK -->
+  <div class="panel bench-panel">
+    <h3 class="panel-title">
+      Strategy Comparison
+      <span class="count" id="benchN">— scenarios</span>
+    </h3>
+    <div class="bench-strats" id="bench-strats"></div>
+    <div class="bench-headline" id="benchHeadline"></div>
+    <canvas id="benchChart" height="68"></canvas>
   </div>
 
 </div>
 
 <script>
-const TAGS = {Identity:'id', Network:'nw', Data:'dt', Endpoint:'ep', BusinessImpact:'bi'};
+// ============================================================================
+// AGENT METADATA
+// ============================================================================
+const AGENT_META = {
+  Identity:       { icon: '🛡',  label: 'Identity Agent',         color: '#5d7eff' },
+  Network:        { icon: '🌐',  label: 'Network Agent',          color: '#00d9ff' },
+  Data:           { icon: '💾',  label: 'Data Agent',             color: '#c084fc' },
+  Endpoint:       { icon: '🖥',  label: 'Endpoint Agent',         color: '#28e3a0' },
+  BusinessImpact: { icon: '💼',  label: 'Business Impact Agent',  color: '#ffc857' },
+};
+const AGENT_ORDER = ['Identity', 'Network', 'Data', 'Endpoint', 'BusinessImpact'];
 
-async function load(){
-  const main = document.getElementById('main');
-  const loading = document.getElementById('loading');
-  const err = document.getElementById('errorBox');
-  err.style.display = 'none'; main.style.display='none'; loading.style.display='block';
+// ============================================================================
+// STATE
+// ============================================================================
+let data = null;
+let topology = null;
+let currentIdx = 0;
+let timeline = null;
+let simState = null;       // {infected:Set, isolated:Set, currentT:number}
+let playing = false;
+let playerStartReal = 0;
+let playerStartT = 0;
+let playerSpeed = 1;
+let playerRAF = null;
+let processedIdx = 0;
+let bannerTimeout = null;
 
-  let data;
+let svg, simulation, nodeSel, linkSel, hostsArr = [], linksArr = [], goldHosts = new Set();
+
+// ============================================================================
+// BOOTSTRAP
+// ============================================================================
+async function bootstrap() {
+  buildAgentCards();
+  bindControls();
+  await loadReport();
+}
+
+async function loadReport() {
+  setStatus('Loading data', 'busy');
   try {
-    const resp = await fetch('../results/demo_report.json?ts=' + Date.now());
-    if(!resp.ok) throw new Error('HTTP ' + resp.status);
-    data = await resp.json();
-  } catch(e){
-    loading.style.display='none';
-    err.style.display='block';
-    err.innerHTML = 'Could not load <code>../results/demo_report.json</code>.<br>' +
-                    'Run <code>python run_demo.py</code> from the repo root first. ('+e.message+')';
+    const r = await fetch('/api/report?ts=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+    data = await r.json();
+  } catch (e) {
+    document.getElementById('boot').style.display = 'none';
+    const err = document.getElementById('err');
+    err.style.display = 'block';
+    err.innerHTML =
+      '<b>Couldn\'t load the simulation report.</b><br><br>' +
+      'You probably opened the file directly. Run this instead, from the repo root:<br><br>' +
+      '<code>python serve.py</code><br><br>' +
+      'It will auto-run the simulation and open this dashboard at <code>http://127.0.0.1:8000</code>.<br><br>' +
+      '<small style="color:#6b7a99">' + (e.message || e) + '</small>';
+    setStatus('Server offline', 'alert');
     return;
   }
+
+  topology = data.topology;
 
   // populate scenario dropdown
   const sel = document.getElementById('scenarioSel');
@@ -194,228 +670,542 @@ async function load(){
   data.walkthrough.forEach((w, i) => {
     const o = document.createElement('option');
     o.value = i;
-    o.textContent = w.scenario.scenario_id + '  —  ' + w.scenario.attack_type;
+    o.textContent = w.scenario.scenario_id + '  ·  ' + w.scenario.attack_type.toUpperCase();
     sel.appendChild(o);
   });
-  sel.onchange = () => render(data, +sel.value);
 
-  render(data, 0);
+  document.getElementById('boot').style.display = 'none';
+  document.getElementById('main').style.display = 'grid';
+
+  loadScenario(0);
   renderBenchmark(data.benchmark);
-  renderTopHeadline(data);
-  loading.style.display='none';
-  main.style.display='grid';
+  setStatus('System ready', 'normal');
 }
 
-function renderTopHeadline(data){
-  const head = data.benchmark && data.benchmark.summary && data.benchmark.summary._headline;
-  document.getElementById('kpiHeadline').textContent = head
-    ? (head.unnecessary_isolation_reduction_vs_aggressive_pct + '%')
-    : '—';
-}
-
-function render(data, idx){
+// ============================================================================
+// SCENARIO LOADING
+// ============================================================================
+function loadScenario(idx) {
+  pause();
+  currentIdx = idx;
   const w = data.walkthrough[idx];
-  document.getElementById('kpiNegoTime').textContent =
-    (w.negotiation.elapsed_seconds * 1000).toFixed(0) + ' ms';
-  document.getElementById('kpiClassical').textContent =
-    (w.classical.runtime_seconds * 1000).toFixed(0) + ' ms';
-  document.getElementById('kpiQuantum').textContent = w.quantum ?
-    (w.quantum.runtime_seconds * 1000).toFixed(0) + ' ms' : 'n/a';
+  timeline = w.timeline || [];
+  processedIdx = 0;
+  simState = { infected: new Set(), isolated: new Set(), currentT: 0, scenario: w.scenario };
 
-  // scenario info
-  const sc = w.scenario;
-  const infoEl = document.getElementById('scenarioInfo');
-  infoEl.innerHTML =
-    `<div class="stat-row"><span class="label">Scenario</span><span><b>${sc.scenario_id}</b></span></div>` +
-    `<div class="stat-row"><span class="label">Attack type</span><span>${sc.attack_type}</span></div>` +
-    `<div class="stat-row"><span class="label">Infected (seed)</span><span>${sc.infected_hosts.join(', ')}</span></div>` +
-    `<div class="stat-row"><span class="label">Elapsed</span><span>${sc.elapsed_minutes} min</span></div>` +
-    `<div class="stat-row"><span class="label">Ground-truth spread</span><span>${sc.ground_truth_spread.length} hosts</span></div>` +
-    `<div class="stat-row"><span class="label">Suspicious URLs</span><span>${(sc.ioc_evidence.urls||[]).length}</span></div>`;
+  document.getElementById('agentsCount').textContent = '5 standing by';
+  document.getElementById('phaseLabel').textContent = 'awaiting attack';
+  document.getElementById('netSummary').innerHTML =
+    `<b>${Object.keys(topology.hosts).length}</b> hosts · <b>${Object.keys(topology.services).length}</b> services · ` +
+    `<b>${Object.values(topology.services).filter(s=>s.sla==='gold').length}</b> gold-SLA tier`;
 
-  // solver table
-  const tbody = document.querySelector('#solverTable tbody');
-  tbody.innerHTML = '';
-  const rows = [
-    ['Negotiation (candidate set)', w.negotiation.final_isolate, null, w.negotiation.elapsed_seconds],
-    ['Classical (OR-Tools)', w.classical.isolate, w.classical, w.classical.runtime_seconds],
-    w.quantum ? ['Quantum-style (neal)', w.quantum.isolate, w.quantum, w.quantum.runtime_seconds] : null
-  ].filter(Boolean);
-  rows.forEach(([label, iso, meta, t]) => {
-    const tr = document.createElement('tr');
-    const cost = revenueImpact(data.topology, iso);
-    tr.innerHTML = `<td>${label}</td>
-        <td>${iso.length}</td>
-        <td>₹${(cost/1e5).toFixed(1)}L</td>
-        <td>${(t*1000).toFixed(0)} ms</td>`;
-    tbody.appendChild(tr);
+  renderNetwork();
+  clearEventLog();
+  resetAgentCards();
+  resetKPIs();
+  renderScenarioInfo(w.scenario);
+
+  const total = (timeline[timeline.length - 1]?.t || 0) / 1000;
+  document.getElementById('tTotal').textContent = total.toFixed(1);
+  document.getElementById('tNow').textContent = '00.0';
+  document.getElementById('timelineProgress').style.width = '0%';
+
+  setStatus('Ready to play', 'normal');
+}
+
+function renderScenarioInfo(sc) {
+  const root = document.getElementById('scnInfo');
+  root.innerHTML = `
+    <span class="lbl">Scenario</span>            <span class="val">${sc.scenario_id}</span>
+    <span class="lbl">Attack type</span>         <span class="val">${sc.attack_type}</span>
+    <span class="lbl">Initial infected</span>    <span class="val">${sc.infected_hosts.join(', ')}</span>
+    <span class="lbl">Elapsed</span>             <span class="val">${sc.elapsed_minutes} min</span>
+    <span class="lbl">Spread if no action</span> <span class="val">${sc.ground_truth_spread.length} hosts</span>
+    <span class="lbl">Suspicious URLs</span>     <span class="val">${(sc.ioc_evidence.urls || []).length}</span>
+  `;
+}
+
+// ============================================================================
+// AGENT CARDS
+// ============================================================================
+function buildAgentCards() {
+  const root = document.getElementById('agents-list');
+  root.innerHTML = '';
+  AGENT_ORDER.forEach(name => {
+    const m = AGENT_META[name];
+    const card = document.createElement('div');
+    card.className = 'agent-card' + (name === 'BusinessImpact' ? ' business' : '');
+    card.id = 'agent-' + name;
+    card.innerHTML = `
+      <div class="agent-head">
+        <div><span class="icon">${m.icon}</span><span class="name">${m.label}</span></div>
+      </div>
+      <div class="conf-row">
+        <div class="conf-bar"><div class="conf-bar-fill" id="ac-${name}-bar"></div></div>
+        <div class="conf-pct" id="ac-${name}-pct">—</div>
+      </div>
+      <div class="agent-reason" id="ac-${name}-reason">Standing by.</div>
+      <div class="ipills" id="ac-${name}-pills"></div>
+    `;
+    root.appendChild(card);
   });
-
-  renderNetwork(data.topology, sc, w.classical.isolate);
-  renderNegotiation(w.negotiation);
 }
 
-function revenueImpact(topology, isolatedList){
-  const iso = new Set(isolatedList);
-  let total = 0;
-  for (const [sid, svc] of Object.entries(topology.services)) {
-    if (svc.depends_on.some(h => iso.has(h))) total += svc.revenue_per_hour;
+function resetAgentCards() {
+  AGENT_ORDER.forEach(name => {
+    const card = document.getElementById('agent-' + name);
+    card.classList.remove('active');
+    document.getElementById('ac-' + name + '-reason').textContent = 'Standing by.';
+    document.getElementById('ac-' + name + '-pct').textContent = '—';
+    document.getElementById('ac-' + name + '-bar').style.width = '0%';
+    document.getElementById('ac-' + name + '-pills').innerHTML = '';
+  });
+}
+
+function activateAgent(name, reasoning, confidence, isolate) {
+  AGENT_ORDER.forEach(n => document.getElementById('agent-' + n).classList.remove('active'));
+  const card = document.getElementById('agent-' + name);
+  if (!card) return;
+  card.classList.add('active');
+  document.getElementById('ac-' + name + '-reason').textContent = reasoning || '...';
+  document.getElementById('ac-' + name + '-pct').textContent = Math.round(confidence * 100) + '%';
+  document.getElementById('ac-' + name + '-bar').style.width = (confidence * 100) + '%';
+  const pillRoot = document.getElementById('ac-' + name + '-pills');
+  pillRoot.innerHTML = '';
+  if (isolate && isolate.length) {
+    isolate.slice(0, 12).forEach(h => {
+      const p = document.createElement('span'); p.className = 'ipill'; p.textContent = h;
+      pillRoot.appendChild(p);
+    });
+    if (isolate.length > 12) {
+      const more = document.createElement('span'); more.className = 'ipill';
+      more.textContent = '+' + (isolate.length - 12) + ' more';
+      pillRoot.appendChild(more);
+    }
   }
-  return total;
 }
 
-function renderNetwork(topology, scenario, isolated){
-  const svg = d3.select('#net');
+// ============================================================================
+// NETWORK RENDER
+// ============================================================================
+function renderNetwork() {
+  const svgEl = document.getElementById('network-svg');
+  const W = svgEl.clientWidth || 800;
+  const H = svgEl.clientHeight || 480;
+  svg = d3.select('#network-svg');
   svg.selectAll('*').remove();
-  const W = svg.node().getBoundingClientRect().width;
-  const H = 420;
 
-  const hosts = Object.values(topology.hosts);
-  const links = topology.edges.map(e => ({source: e.a, target: e.b}));
-  const infectedSet = new Set(scenario.infected_hosts);
-  const isolatedSet = new Set(isolated);
+  // defs: glow filter
+  const defs = svg.append('defs');
+  const f = defs.append('filter').attr('id','glow').attr('x','-60%').attr('y','-60%')
+    .attr('width','220%').attr('height','220%');
+  f.append('feGaussianBlur').attr('stdDeviation','2.5').attr('result','b');
+  const merge = f.append('feMerge');
+  merge.append('feMergeNode').attr('in','b');
+  merge.append('feMergeNode').attr('in','SourceGraphic');
 
-  // gold tier hosts: any host that is part of a gold service
-  const goldHosts = new Set();
+  hostsArr = Object.values(topology.hosts).map(h => ({...h}));
+  linksArr = topology.edges.map(e => ({source: e.a, target: e.b}));
+
+  goldHosts = new Set();
   for (const svc of Object.values(topology.services)) {
     if (svc.sla === 'gold') svc.depends_on.forEach(h => goldHosts.add(h));
   }
 
-  const colorOf = h => {
-    if (infectedSet.has(h.host_id)) return '#ff6b6b';
-    if (isolatedSet.has(h.host_id)) return '#ffc857';
-    if (h.contains_pii) return '#c084fc';
-    return '#46d39a';
-  };
-
-  const sim = d3.forceSimulation(hosts)
-    .force('link', d3.forceLink(links).id(d => d.host_id).distance(60))
-    .force('charge', d3.forceManyBody().strength(-130))
+  if (simulation) simulation.stop();
+  simulation = d3.forceSimulation(hostsArr)
+    .force('link', d3.forceLink(linksArr).id(d => d.host_id).distance(62).strength(0.35))
+    .force('charge', d3.forceManyBody().strength(-200))
     .force('center', d3.forceCenter(W/2, H/2))
-    .force('collide', d3.forceCollide().radius(13));
+    .force('collide', d3.forceCollide().radius(d => 16 + d.criticality));
 
-  const link = svg.append('g').selectAll('line').data(links)
-    .enter().append('line').attr('class', 'edge');
+  linkSel = svg.append('g').attr('class','links')
+    .selectAll('line').data(linksArr).enter()
+    .append('line').attr('class','link-line')
+    .attr('stroke', 'var(--line)').attr('stroke-width', 1).attr('opacity', 0.55);
 
-  const node = svg.append('g').selectAll('g').data(hosts)
-    .enter().append('g');
+  const nodeG = svg.append('g').attr('class','nodes')
+    .selectAll('g').data(hostsArr).enter()
+    .append('g').attr('data-host', d => d.host_id);
 
-  node.append('circle')
-    .attr('class', 'node')
-    .attr('r', d => 6 + d.criticality)
-    .attr('fill', d => colorOf(d))
-    .attr('stroke', d => goldHosts.has(d.host_id) ? '#fde68a' : '#0a1228')
-    .attr('stroke-width', d => goldHosts.has(d.host_id) ? 2.5 : 1.5);
+  // pulse ring
+  nodeG.append('circle').attr('class','pulse-ring').attr('r', 10);
 
-  node.append('title').text(d =>
-    `${d.host_id}\ntype: ${d.host_type}\nSLA: ${d.sla_tier}\n₹/hr: ${d.revenue_per_hour}\nPII: ${d.contains_pii}`);
+  // outer ring (PII purple / gold amber)
+  nodeG.append('circle')
+    .attr('class','node-outer')
+    .attr('r', d => 9 + d.criticality * 0.8)
+    .attr('fill','none')
+    .attr('stroke', d => goldHosts.has(d.host_id) ? '#ffc857' : (d.contains_pii ? '#c084fc' : 'transparent'))
+    .attr('stroke-width', d => (goldHosts.has(d.host_id) || d.contains_pii) ? 2 : 0)
+    .attr('opacity', 0.7);
 
-  node.append('text').attr('class', 'node-label')
-    .attr('text-anchor', 'middle').attr('dy', 22)
+  // main node
+  nodeG.append('circle')
+    .attr('class', 'node-host healthy')
+    .attr('data-circle', d => d.host_id)
+    .attr('r', d => 6 + d.criticality * 0.6)
+    .attr('fill', '#28e3a0')
+    .style('filter', 'url(#glow)');
+
+  nodeG.append('text').attr('class','node-label')
+    .attr('text-anchor','middle')
+    .attr('dy', d => 9 + d.criticality * 0.8 + 12)
     .text(d => d.host_id);
 
-  sim.on('tick', () => {
-    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  nodeG.append('title').text(d =>
+    `${d.host_id}\n${d.host_type}\nSLA: ${d.sla_tier}\n₹${(d.revenue_per_hour/1e5).toFixed(1)}L/hr if down` +
+    (d.contains_pii ? '\ncontains PII' : ''));
+
+  nodeSel = nodeG;
+
+  simulation.on('tick', () => {
+    linkSel
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeG.attr('transform', d => `translate(${d.x},${d.y})`);
   });
+
+  // run sim for a moment, then freeze for stability
+  simulation.alpha(0.9).restart();
+  setTimeout(() => { simulation.alphaTarget(0).alpha(0.02); }, 1100);
 }
 
-function renderNegotiation(neg){
-  const root = document.getElementById('negotiation');
-  root.innerHTML = '';
+function markHost(hostId, state) {
+  const circle = document.querySelector(`circle[data-circle="${hostId}"]`);
+  if (!circle) return;
+  circle.classList.remove('infected','isolated','healthy');
+  circle.classList.add(state);
+  const colors = { infected: '#ff3860', isolated: '#ffc857', healthy: '#28e3a0' };
+  d3.select(circle).transition().duration(450)
+    .attr('fill', colors[state] || colors.healthy)
+    .attr('opacity', state === 'isolated' ? 0.45 : 1.0);
+}
 
-  neg.phases.forEach(ph => {
-    const div = document.createElement('div');
-    div.className = 'phase' + (ph.phase === 'CONSENSUS' ? ' active' : '');
-    let body = '';
+function dimEdges(hostId) {
+  d3.selectAll('.link-line')
+    .filter(d => (d.source.host_id || d.source) === hostId || (d.target.host_id || d.target) === hostId)
+    .classed('dimmed', true);
+}
 
-    if (ph.phase === 'PROPOSAL') {
-      body = '<div class="small" style="margin-bottom:4px">Each specialist independently proposes hosts to isolate.</div>';
-      for (const [name, p] of Object.entries(ph.proposals)) {
-        const tag = TAGS[name] || 'id';
-        body += `<div class="agent"><div class="name">${name} <span class="tag ${tag}">${name}</span></div>` +
-                `<div class="reason">${p.reasoning}</div>` +
-                `<div>${p.isolate.map(h => '<span class="pill iso">'+h+'</span>').join('') || '<span class="small">— no isolation —</span>'}</div>` +
-                `<div class="small">confidence ${(p.confidence*100).toFixed(0)}%</div></div>`;
-      }
-    } else if (ph.phase === 'CRITIQUE') {
-      body = '<div class="small" style="margin-bottom:4px">Joint candidate: ' +
-             ph.joint_candidate.map(h=>'<span class="pill">'+h+'</span>').join('') + '</div>';
-      for (const [name, c] of Object.entries(ph.critiques)) {
-        const tag = TAGS[name] || 'id';
-        body += `<div class="agent"><div class="name">${name} <span class="tag ${tag}">${name}</span>` +
-                `<span class="small"> — ${c.satisfied ? 'satisfied' : 'has concerns'}</span></div>` +
-                `<div class="reason">${c.concerns}</div></div>`;
-      }
-    } else if (ph.phase === 'COUNTER') {
-      body = '<div class="small">Joint set after agents accept critiques:</div>' +
-             '<div>' + ph.joint_after_counter.map(h=>'<span class="pill iso">'+h+'</span>').join('') + '</div>';
-    } else if (ph.phase === 'BUSINESS_VETO') {
-      body = `<div class="small">Business Impact Agent: ${ph.satisfied ? 'satisfied' : 'vetoing'} — ${ph.concerns}</div>` +
-             `<div>vetoed: ${(ph.vetoed_hosts||[]).map(h=>'<span class="pill veto">'+h+'</span>').join('') || '<i>none</i>'}</div>` +
-             `<div style="margin-top:6px">final set:</div>` +
-             `<div>${(ph.joint_after_veto||[]).map(h=>'<span class="pill iso">'+h+'</span>').join('')}</div>`;
-    } else if (ph.phase === 'CONSENSUS') {
-      body = `<div class="small">Consensus reached — handed to optimizer.</div>` +
-             `<div><b>${ph.n_hosts}</b> hosts to isolate, ₹${(ph.revenue_impact_per_hour/1e5).toFixed(1)}L/hr cost, ` +
-             `${ph.sla_breaches.length} gold SLA breach(es).</div>` +
-             `<div>${ph.final_isolate.map(h=>'<span class="pill iso">'+h+'</span>').join('')}</div>`;
+function pulse(hostId, color, size = 36) {
+  const ring = d3.select(`g[data-host="${hostId}"] .pulse-ring`);
+  if (ring.empty()) return;
+  ring.interrupt();
+  ring.attr('stroke', color).attr('opacity', 1).attr('r', 8).attr('stroke-width', 2.5);
+  ring.transition().duration(1100)
+    .attr('r', size).attr('opacity', 0).attr('stroke-width', 0.5);
+}
+
+function flashHost(hostId, color) {
+  pulse(hostId, color, 22);
+}
+
+// ============================================================================
+// EVENT APPLICATION
+// ============================================================================
+function fmtT(ms) {
+  return (ms / 1000).toFixed(1).padStart(4, '0');
+}
+
+function applyEvent(ev) {
+  const T = fmtT(ev.t);
+  switch (ev.type) {
+    case 'ATTACK_DETECTED': {
+      logEvent(T, `⚠ ATTACK DETECTED — ${ev.data.attack_type.toUpperCase()} (${ev.data.elapsed_min} min since initial compromise)`, 'attack');
+      setStatus('Attack in progress', 'alert');
+      showPhaseBanner('🚨 Attack Detected', null, 'attack');
+      document.getElementById('phaseLabel').textContent = 'attack detected';
+      break;
     }
+    case 'HOST_INFECTED': {
+      simState.infected.add(ev.data.host);
+      markHost(ev.data.host, 'infected');
+      pulse(ev.data.host, '#ff3860', 40);
+      logEvent(T, `host <em>${ev.data.host}</em> compromised`, 'attack');
+      setKPI('kpi-infected', simState.infected.size);
+      flashKPI('kpiInfectedCard');
+      break;
+    }
+    case 'PHASE_BANNER': {
+      showPhaseBanner(ev.data.text, ev.data.subtext);
+      logEvent(T, '▸ ' + ev.data.text, 'banner');
+      document.getElementById('phaseLabel').textContent = ev.data.text.toLowerCase();
+      break;
+    }
+    case 'AGENT_PROPOSAL': {
+      activateAgent(ev.data.agent, ev.data.reasoning, ev.data.confidence, ev.data.isolate);
+      const m = AGENT_META[ev.data.agent];
+      logEvent(T, `${m.icon} <em>${ev.data.agent}</em>: proposes isolating ${ev.data.isolate.length} host(s) — conf ${(ev.data.confidence*100).toFixed(0)}%`, 'agent');
+      ev.data.isolate.forEach((h, i) => setTimeout(() => flashHost(h, m.color), i * 35));
+      break;
+    }
+    case 'AGENT_CRITIQUE': {
+      const msg = ev.data.satisfied
+        ? `${AGENT_META[ev.data.agent].icon} ${ev.data.agent}: satisfied`
+        : `${AGENT_META[ev.data.agent].icon} ${ev.data.agent}: ⚠ ${ev.data.concerns.slice(0, 110)}`;
+      logEvent(T, msg, 'agent');
+      break;
+    }
+    case 'BUSINESS_VETO': {
+      activateAgent('BusinessImpact', ev.data.concerns, 1.0, ev.data.vetoed);
+      if (ev.data.vetoed && ev.data.vetoed.length) {
+        logEvent(T, `💼 Business Impact VETO: ${ev.data.vetoed.join(', ')}`, 'veto');
+        ev.data.vetoed.forEach(h => pulse(h, '#ffc857', 32));
+      } else {
+        logEvent(T, `💼 Business Impact: ${ev.data.concerns}`, 'veto');
+      }
+      break;
+    }
+    case 'SOLVER_RUNNING': {
+      logEvent(T, `⚡ Optimizer engaged — ${ev.data.candidate_count} candidate hosts`, 'solver');
+      setStatus('Optimizing containment', 'busy');
+      break;
+    }
+    case 'SOLVER_RESULT': {
+      const c = ev.data;
+      logEvent(T, `Classical (OR-Tools): ${c.isolate.length} hosts in ${c.runtime_ms.toFixed(0)}ms · objective ${c.objective != null ? Math.round(c.objective) : '—'}`, 'solver');
+      if (c.quantum) {
+        logEvent(T, `Quantum (D-Wave neal): ${c.quantum.isolate.length} hosts in ${c.quantum.runtime_ms.toFixed(0)}ms`, 'solver');
+      }
+      break;
+    }
+    case 'HOST_ISOLATED': {
+      simState.isolated.add(ev.data.host);
+      markHost(ev.data.host, 'isolated');
+      dimEdges(ev.data.host);
+      pulse(ev.data.host, '#ffc857', 28);
+      logEvent(T, `→ quarantining <em>${ev.data.host}</em>`, 'isolate');
+      setKPI('kpi-isolated', simState.isolated.size);
+      flashKPI('kpiIsolatedCard');
+      updateLiveCost();
+      break;
+    }
+    case 'CONTAINMENT_COMPLETE': {
+      logEvent(T, `✓ CONTAINMENT COMPLETE — ${ev.data.n_isolated} hosts isolated`, 'solver');
+      setStatus('Contained — neutralized', 'normal');
+      showPhaseBanner('✅ Containment Complete',
+        `${ev.data.n_isolated} hosts isolated · ${computeSLABreaches()} gold SLA breach(es)`,
+        'success');
+      document.getElementById('phaseLabel').textContent = 'contained';
+      setKPI('kpi-sla', computeSLABreaches());
+      flashKPI('kpiSlaCard');
+      break;
+    }
+  }
+}
 
-    div.innerHTML = `<h4>${ph.phase.replace('_',' ')}</h4>` + body;
+function updateLiveCost() {
+  let total = 0;
+  for (const svc of Object.values(topology.services)) {
+    if (svc.depends_on.some(h => simState.isolated.has(h))) total += svc.revenue_per_hour;
+  }
+  // savings vs aggressive (~₹118.5L/hr typical)
+  const AGGRESSIVE_COST = 118.5;
+  const ourLakh = total / 1e5;
+  const saved = Math.max(0, AGGRESSIVE_COST - ourLakh);
+  setKPI('kpi-saved', '₹' + saved.toFixed(1) + 'L');
+  flashKPI('kpiSavedCard');
+}
+
+function computeSLABreaches() {
+  let n = 0;
+  for (const svc of Object.values(topology.services)) {
+    if (svc.sla === 'gold' && svc.depends_on.some(h => simState.isolated.has(h))) n++;
+  }
+  return n;
+}
+
+// ============================================================================
+// UI HELPERS
+// ============================================================================
+function logEvent(time, html, klass) {
+  const log = document.getElementById('eventLog');
+  const div = document.createElement('div');
+  div.className = 'event-entry ' + (klass || '');
+  div.innerHTML = `<span class="time">${time}s</span><span class="msg">${html}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearEventLog() {
+  document.getElementById('eventLog').innerHTML = '';
+}
+
+function setKPI(id, val) { document.getElementById(id).textContent = val; }
+function flashKPI(cardId) {
+  const c = document.getElementById(cardId);
+  c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash');
+}
+function resetKPIs() {
+  setKPI('kpi-infected', '0');
+  setKPI('kpi-isolated', '0');
+  setKPI('kpi-saved', '₹0L');
+  setKPI('kpi-sla', '0');
+}
+
+function setStatus(text, mode) {
+  const pill = document.getElementById('statusPill');
+  pill.className = 'status-pill' + (mode && mode !== 'normal' ? ' ' + mode : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+function showPhaseBanner(text, subtext, mode) {
+  const b = document.getElementById('phaseBanner');
+  b.className = 'phase-banner show' + (mode ? ' ' + mode : '');
+  b.innerHTML = text + (subtext ? `<span class="sub">${subtext}</span>` : '');
+  if (bannerTimeout) clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => b.classList.remove('show'), 2000);
+}
+
+// ============================================================================
+// PLAYBACK ENGINE
+// ============================================================================
+function play() {
+  if (!timeline || timeline.length === 0) return;
+  if (processedIdx >= timeline.length) { loadScenario(currentIdx); }
+  playing = true;
+  document.getElementById('playBtn').textContent = '⏸ Pause';
+  playerStartReal = performance.now();
+  playerStartT = simState.currentT;
+  tick();
+}
+
+function pause() {
+  playing = false;
+  document.getElementById('playBtn').textContent = '▶ Play';
+  if (playerRAF) cancelAnimationFrame(playerRAF);
+}
+
+function tick() {
+  if (!playing) return;
+  const realElapsed = (performance.now() - playerStartReal) * playerSpeed;
+  const virtualT = playerStartT + realElapsed;
+  simState.currentT = virtualT;
+  while (processedIdx < timeline.length && timeline[processedIdx].t <= virtualT) {
+    applyEvent(timeline[processedIdx]);
+    processedIdx++;
+  }
+  const totalT = timeline[timeline.length - 1].t;
+  const pct = Math.min(100, (virtualT / totalT) * 100);
+  document.getElementById('timelineProgress').style.width = pct + '%';
+  document.getElementById('tNow').textContent = (virtualT / 1000).toFixed(1).padStart(4, '0');
+  if (processedIdx < timeline.length) {
+    playerRAF = requestAnimationFrame(tick);
+  } else {
+    pause();
+  }
+}
+
+// ============================================================================
+// BENCHMARK
+// ============================================================================
+function renderBenchmark(bench) {
+  if (!bench || !bench.summary) return;
+  const sum = bench.summary;
+  const strategies = ['AGGRESSIVE', 'CONSERVATIVE', 'AMCDS_CLASSICAL', 'AMCDS_QUANTUM']
+    .filter(s => sum[s]);
+  document.getElementById('benchN').textContent =
+    (sum[strategies[0]]?.n_scenarios || 0) + ' scenarios';
+
+  // pick a winner: AMCDS_CLASSICAL by default, unless QUANTUM is strictly better.
+  let winner = 'AMCDS_CLASSICAL';
+  if (sum.AMCDS_QUANTUM && sum.AMCDS_CLASSICAL &&
+      sum.AMCDS_QUANTUM.avg_unnecessary_isolation < sum.AMCDS_CLASSICAL.avg_unnecessary_isolation &&
+      sum.AMCDS_QUANTUM.avg_sla_breaches <= sum.AMCDS_CLASSICAL.avg_sla_breaches) {
+    winner = 'AMCDS_QUANTUM';
+  }
+
+  const root = document.getElementById('bench-strats');
+  root.innerHTML = '';
+  strategies.forEach(s => {
+    const m = sum[s];
+    const isWinner = (s === winner);
+    const isLoser = (s === 'AGGRESSIVE' || s === 'CONSERVATIVE');
+    const div = document.createElement('div');
+    div.className = 'strat-card' + (isWinner ? ' winner' : '') + (isLoser ? ' loser' : '');
+    div.innerHTML = `
+      <h4>${s.replace('_', ' ')}</h4>
+      <div class="strat-row"><span class="l">Unnecessary iso</span><span class="v">${m.avg_unnecessary_isolation.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">Residual risk</span><span class="v">${m.avg_residual_risk.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">Cost / hr</span><span class="v">₹${(m.avg_revenue_impact/1e5).toFixed(1)}L</span></div>
+      <div class="strat-row"><span class="l">SLA breaches</span><span class="v">${m.avg_sla_breaches.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">Response time</span><span class="v">${(m.avg_response_time_seconds*1000).toFixed(0)} ms</span></div>
+    `;
     root.appendChild(div);
   });
-}
 
-function renderBenchmark(b){
-  if(!b || !b.summary){ return; }
-  const sum = b.summary;
-  // Strategy order
-  const strategies = ['AGGRESSIVE','CONSERVATIVE','AMCDS_CLASSICAL','AMCDS_QUANTUM'].filter(s => sum[s]);
+  const head = sum._headline;
+  if (head) {
+    document.getElementById('benchHeadline').innerHTML =
+      `AMCDS reduces unnecessary isolation by <b>${head.unnecessary_isolation_reduction_vs_aggressive_pct}%</b> vs aggressive baseline`;
+  }
+
+  // chart
   const ctx = document.getElementById('benchChart').getContext('2d');
   if (window._chart) window._chart.destroy();
   window._chart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: strategies,
+      labels: strategies.map(s => s.replace('_', ' ')),
       datasets: [
-        {label: 'Unnecessary isolation', data: strategies.map(s => sum[s].avg_unnecessary_isolation),
-         backgroundColor:'#ffc857'},
-        {label: 'Residual risk', data: strategies.map(s => sum[s].avg_residual_risk),
-         backgroundColor:'#ff6b6b'},
+        { label: 'Unnecessary isolation', data: strategies.map(s => sum[s].avg_unnecessary_isolation), backgroundColor: '#ffc857' },
+        { label: 'Residual risk',         data: strategies.map(s => sum[s].avg_residual_risk),         backgroundColor: '#ff3860' },
       ]
     },
     options: {
-      responsive:true,
-      plugins:{legend:{labels:{color:'#e6edf7'}}},
-      scales:{
-        x:{ticks:{color:'#8b9bbf'}, grid:{color:'#1d2a55'}},
-        y:{ticks:{color:'#8b9bbf'}, grid:{color:'#1d2a55'}, beginAtZero:true}
+      animation: { duration: 900 },
+      plugins: {
+        legend: { labels: { color: '#e2e8f5', font: { family: 'inherit' } } },
+        tooltip: { backgroundColor: '#0b1530', borderColor: '#00d9ff', borderWidth: 1 }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7a99' }, grid: { color: 'rgba(30,43,77,0.5)' } },
+        y: { ticks: { color: '#6b7a99' }, grid: { color: 'rgba(30,43,77,0.5)' }, beginAtZero: true }
       }
     }
   });
-  document.getElementById('benchSub').textContent =
-    `lower = better on both bars. AMCDS sits in the sweet spot.`;
+}
 
-  // detailed table
-  const tbody = document.querySelector('#benchTable tbody');
-  tbody.innerHTML = '';
-  Object.entries(sum).forEach(([k,v]) => {
-    if(k.startsWith('_')) return;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td><b>${k}</b></td><td>${v.n_scenarios}</td>
-      <td>${v.avg_unnecessary_isolation.toFixed(2)}</td>
-      <td>${v.avg_residual_risk.toFixed(2)}</td>
-      <td>₹${(v.avg_revenue_impact/1e5).toFixed(1)}L</td>
-      <td>${v.avg_sla_breaches.toFixed(2)}</td>
-      <td>${(v.avg_response_time_seconds*1000).toFixed(0)} ms</td>`;
-    tbody.appendChild(tr);
+// ============================================================================
+// CONTROLS
+// ============================================================================
+function bindControls() {
+  document.getElementById('playBtn').onclick = () => playing ? pause() : play();
+  document.getElementById('resetBtn').onclick = () => { pause(); loadScenario(currentIdx); };
+  document.getElementById('scenarioSel').onchange = e => loadScenario(+e.target.value);
+  document.getElementById('speedSel').onchange = e => {
+    const s = parseFloat(e.target.value);
+    if (playing) {
+      playerStartT = simState.currentT;
+      playerStartReal = performance.now();
+    }
+    playerSpeed = s;
+  };
+  document.getElementById('regenBtn').onclick = async () => {
+    if (!confirm('Regenerate the simulation? Takes ~20–60 seconds.')) return;
+    setStatus('Regenerating data…', 'busy');
+    document.getElementById('regenBtn').disabled = true;
+    try {
+      const r = await fetch('/api/regenerate', { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      await loadReport();
+    } catch (e) {
+      setStatus('Regenerate failed', 'alert');
+      alert('Regenerate failed: ' + e.message);
+    } finally {
+      document.getElementById('regenBtn').disabled = false;
+    }
+  };
+  // Keyboard shortcuts
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
+    if (e.code === 'KeyR') { document.getElementById('resetBtn').click(); }
   });
 }
 
-document.getElementById('reloadBtn').onclick = load;
-load();
+bootstrap();
 </script>
 </body>
 </html>

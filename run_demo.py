@@ -25,6 +25,7 @@ import sys
 from amcds.agents import (BusinessImpactAgent, DataAgent, EndpointAgent,
                           IdentityAgent, NetworkAgent)
 from amcds.evaluation import EvaluationHarness
+from amcds.events import build_timeline
 from amcds.negotiation import NegotiationProtocol
 from amcds.network.topology import build_sample_enterprise
 from amcds.optimization import ClassicalSolver, QuantumSolver
@@ -72,13 +73,26 @@ def run_single_scenario(topology, scenario, run_quantum: bool = True) -> dict:
               f"isolates {len(quantum['isolate'])} hosts "
               f"(via {quantum['solver']})")
 
+    classical_payload = {**classical,
+                         "isolate": sorted(list(classical["isolate"]))}
+    quantum_payload = (None if quantum is None else
+                       {**quantum, "isolate": sorted(list(quantum["isolate"]))})
+
+    # Build the cinematic event timeline the dashboard replays.
+    timeline = build_timeline(
+        scenario=scenario.to_dict(),
+        negotiation_log=log.to_dict(),
+        classical_result=classical_payload,
+        quantum_result=quantum_payload,
+    )
+
     return {
         "scenario": scenario.to_dict(),
         "negotiation": log.to_dict(),
-        "classical": {**classical,
-                      "isolate": sorted(list(classical["isolate"]))},
-        "quantum": (None if quantum is None else
-                    {**quantum, "isolate": sorted(list(quantum["isolate"]))}),
+        "classical": classical_payload,
+        "quantum": quantum_payload,
+        "timeline": timeline,
+        "timeline_duration_ms": timeline[-1]["t"] if timeline else 0,
     }
 
 

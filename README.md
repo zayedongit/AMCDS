@@ -99,7 +99,7 @@ Full numbers are written to `results/demo_report.json` after each run, and rende
 
 ---
 
-## Quick start
+## Quick start — one command
 
 You'll need Python 3.10+ and pip.
 
@@ -107,23 +107,44 @@ You'll need Python 3.10+ and pip.
 git clone https://github.com/zayedongit/AMCDS.git
 cd AMCDS
 pip install -r requirements.txt
-python run_demo.py
+python serve.py
 ```
 
-The demo:
-1. Builds a 27-host enterprise topology with 8 business services and 3 gold-SLA services.
-2. Walks through one ransomware, one lateral-movement, and one insider-threat scenario, showing every agent's reasoning and the final classical + quantum solver output.
-3. Runs a 45-scenario benchmark against the two automated baselines.
-4. Writes `results/demo_report.json`.
+That's it. `serve.py` will:
 
-Then **open `dashboard/index.html` in your browser** to see:
+1. Run the simulation if no `results/demo_report.json` exists yet.
+2. Start a local web server at **http://127.0.0.1:8000**.
+3. Auto-open your browser to the **Live Containment Theater** dashboard.
 
-- The enterprise network with infected (red) and isolated (amber) hosts.
-- The full 5-phase agent negotiation log, with every agent's reasoning.
-- Classical vs quantum-style solver runtime and isolation set side-by-side.
-- A benchmark chart comparing AMCDS to the baselines.
+You should land on a cinematic dark-themed UI with a force-directed network map, agent side-panel, scrolling event log, live metrics, and a benchmark comparison.
 
-You can also point the dashboard at any scenario in the dropdown.
+Hit **▶ Play** to watch a 20-second cinematic replay of the attack and containment:
+
+- Red pulses ripple as the attack lands and hosts compromise.
+- Each specialist agent lights up on the side panel when it speaks, with live reasoning and a confidence bar.
+- The Business Impact Agent vetoes any SLA-breaching isolation in real time.
+- Amber pulses sweep as containment fires; isolated nodes fade and their edges go dashed.
+- KPIs animate, the event log scrolls, the strategy comparison shows AMCDS landing in the sweet spot.
+
+### Dashboard controls
+
+| | |
+|---|---|
+| **Scenario dropdown** | switch between the three walkthrough scenarios |
+| **▶ Play / ⏸ Pause** | spacebar shortcut |
+| **⟲ Reset** | R shortcut — replay current scenario |
+| **0.5× / 1× / 2× / 4×** | playback speed |
+| **↻ New data** | server reruns the full simulation and reloads the dashboard |
+
+### CLI-only fallback
+
+If you don't want a browser at all, you can still run:
+
+```bash
+python run_demo.py             # prints the walkthrough + benchmark
+```
+
+A `dashboard/index.html` file is served by `serve.py`. Opening it directly via `file://` won't work because browsers refuse cross-origin file reads — always launch via `python serve.py`.
 
 ### Optional: train the URL threat detector
 
@@ -163,7 +184,8 @@ No other code changes needed — the QUBO formulation is identical.
 AMCDS/
 ├── README.md
 ├── requirements.txt
-├── run_demo.py                ← single-command demo entry point
+├── serve.py                   ← ★ one-command launcher (FastAPI + auto browser)
+├── run_demo.py                ← runs the simulation, writes demo_report.json
 │
 ├── amcds/                     ← core package
 │   ├── network/topology.py    ← enterprise network model + service deps
@@ -177,13 +199,40 @@ AMCDS/
 │   ├── optimization/
 │   │   ├── classical_solver.py    ← Google OR-Tools CP-SAT
 │   │   └── quantum_solver.py      ← D-Wave neal (simulated annealer)
+│   ├── events/timeline.py         ← ★ paces sim events into cinematic timeline
 │   ├── scenarios/generator.py     ← ransomware / lateral / insider
 │   └── evaluation/benchmark.py    ← AMCDS vs aggressive vs conservative
 │
-├── dashboard/index.html       ← single-file HTML + D3 + Chart.js visualisation
+├── dashboard/index.html       ← ★ live containment theater (D3 + Chart.js)
 ├── https-detector/            ← URL-threat ML model used by the Network agent
 └── results/                   ← demo_report.json written here
 ```
+
+## How the live dashboard works
+
+```
+┌────────────────────┐    POST /api/regenerate    ┌─────────────────────┐
+│                    │ ────────────────────────▶ │                     │
+│   Browser          │                            │   serve.py          │
+│   dashboard/       │                            │   (FastAPI/uvicorn) │
+│   index.html       │ ◀──────────────────────── │                     │
+│                    │       /api/report          └──────────┬──────────┘
+│   - D3 force graph │           (JSON)                      │
+│   - Chart.js bench │                                       │ runs
+│   - Playback loop  │                                       ▼
+│   - Event log      │                            ┌─────────────────────┐
+│                    │                            │   run_demo.py       │
+└────────────────────┘                            │   ↓                 │
+                                                  │   agents +          │
+                                                  │   negotiation +     │
+                                                  │   solvers +         │
+                                                  │   build_timeline()  │
+                                                  │   ↓                 │
+                                                  │   demo_report.json  │
+                                                  └─────────────────────┘
+```
+
+The simulation pipeline runs in milliseconds; the `amcds/events/timeline.py` module **re-paces** the raw events into a 15–25 second time-stamped sequence — one `ATTACK_DETECTED`, then `HOST_INFECTED` for each seed host, then `AGENT_PROPOSAL` for each of the five agents (with reasoning + confidence), critique, business veto, solver result, and `HOST_ISOLATED` one host at a time. The dashboard pulls this timeline from `/api/report` once on load and plays it back locally using `requestAnimationFrame` at the chosen speed — so scrubbing, pausing, and replaying have zero server cost.
 
 ---
 
