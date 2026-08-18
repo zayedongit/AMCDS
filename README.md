@@ -93,9 +93,37 @@ Run across **45 synthetic attack scenarios** (15 ransomware, 15 lateral movement
 
 > **AMCDS reduces unnecessary service isolation by 86.7% vs the aggressive baseline** while keeping residual attack risk an order of magnitude lower than the conservative baseline — and breaks roughly zero gold-tier SLAs.
 
-(Your abstract projected a 33% reduction; the prototype substantially exceeds that target.)
 
 Full numbers are written to `results/demo_report.json` after each run, and rendered live in the dashboard.
+
+---
+
+## What's built vs what's specified
+
+This repository contains two tiers, and it's worth being explicit about which is which.
+
+**Built and runnable** — `amcds/`, launched with `python serve.py`:
+the five specialist agents, the 5-phase negotiation protocol, the OR-Tools CP-SAT solver, the D-Wave
+QUBO formulation on a simulated annealer, the NetworkX topology model, the TF-IDF + Random Forest URL
+threat classifier, and the Live Containment Theater dashboard. This runs in-memory on local Python
+data structures. It needs no Kafka, no Ray, no Docker, and no databases.
+
+**Specified, not built** — `docs/architecture.md`, `docs/agent_design.md`, `docker-compose.yml`,
+`messaging/`, `database/`:
+a distributed scaling architecture using Apache Kafka for telemetry streaming, Ray actors for parallel
+detection agents, and Neo4j / PostgreSQL / Redis for topology persistence, incident recording and
+agent state caching. Kafka topic definitions, Cypher and SQL init scripts exist as configuration. The
+core prototype does not use any of it.
+
+If you want to see the system work, run `python serve.py`. The container stack is the production path,
+not the demo.
+
+> **Reproducing the benchmark.** The 45-scenario results quoted above are 15 scenarios per attack
+> type. `run_demo.py` defaults to 30 per type (90 total), so to match the numbers in this README run:
+>
+> ```bash
+> python run_demo.py --scenarios-per-type 15
+> ```
 
 ---
 

@@ -41,3 +41,4 @@ https-detector/src/server.log
 _bmad/
 _bmad-output/
 .agent/
+push_to_github.sh
