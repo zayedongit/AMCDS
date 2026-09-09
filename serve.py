@@ -11,7 +11,7 @@ Endpoints
 ---------
 GET  /                  → the cinematic dashboard
 GET  /api/report        → the latest demo_report.json
-POST /api/regenerate    → re-runs run_demo.py (so the dashboard "Regenerate"
+POST /api/regenerate    → re-runs run_demo.py (so the dashboard "New data"
                           button can refresh the simulation without leaving
                           the browser)
 GET  /api/health        → liveness check (used by dashboard on connect)
@@ -48,16 +48,14 @@ RESULTS_DIR = HERE / "results"
 REPORT_PATH = RESULTS_DIR / "demo_report.json"
 
 
-def ensure_report(scenarios_per_type: int = 15, quantum_sample: int = 3) -> None:
+def ensure_report(per_type: int = 15) -> None:
     """If no report exists yet, run the demo so the dashboard has data."""
     if REPORT_PATH.exists() and REPORT_PATH.stat().st_size > 0:
         return
-    print("📊 No demo_report.json — running an initial simulation "
-          f"({scenarios_per_type*3} benchmark scenarios)…")
+    print("No demo_report.json yet — running an initial simulation "
+          f"({per_type * 3} benchmark scenarios)…")
     subprocess.run(
-        [sys.executable, str(HERE / "run_demo.py"),
-         "--scenarios-per-type", str(scenarios_per_type),
-         "--quantum-sample", str(quantum_sample)],
+        [sys.executable, str(HERE / "run_demo.py"), "--per-type", str(per_type)],
         cwd=str(HERE), check=True,
     )
 
@@ -91,20 +89,19 @@ def create_app() -> FastAPI:
         return FileResponse(REPORT_PATH, media_type="application/json")
 
     @app.post("/api/regenerate")
-    def regenerate(scenarios_per_type: int = 15, quantum_sample: int = 3):
+    def regenerate(per_type: int = 15):
         """Re-run the simulation and return the new report."""
         try:
             subprocess.run(
                 [sys.executable, str(HERE / "run_demo.py"),
-                 "--scenarios-per-type", str(scenarios_per_type),
-                 "--quantum-sample", str(quantum_sample)],
-                cwd=str(HERE), check=True, timeout=180,
+                 "--per-type", str(per_type)],
+                cwd=str(HERE), check=True, timeout=300,
                 capture_output=True, text=True,
             )
         except subprocess.CalledProcessError as e:
             raise HTTPException(500, f"run_demo.py failed: {e.stderr[-1000:]}")
         except subprocess.TimeoutExpired:
-            raise HTTPException(504, "Regeneration timed out after 180s")
+            raise HTTPException(504, "Regeneration timed out after 300s")
         return JSONResponse({"status": "regenerated",
                              "report_path": str(REPORT_PATH)})
 
@@ -139,7 +136,7 @@ def main() -> int:
 
     url = f"http://{args.host}:{args.port}"
     banner = "═" * 64
-    print(f"\n{banner}\n  🚀  AMCDS Live Dashboard\n  {url}\n{banner}\n"
+    print(f"\n{banner}\n  AMCDS Live Dashboard\n  {url}\n{banner}\n"
           f"   Press Ctrl+C to stop.\n")
     if not args.no_browser:
         threading.Thread(target=open_browser_after, args=(url,),
