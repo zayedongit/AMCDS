@@ -1,29 +1,20 @@
-# Core
-numpy>=1.24
-pandas>=2.0
-scikit-learn>=1.3
-joblib>=1.3
+# AMCDS runtime dependencies.
+#
+# Lower bounds are the versions the code is written against; upper bounds keep a
+# future major release from silently changing behaviour. Versions verified in
+# development are listed in the comment at the end of each line.
 
-# Classical optimization
-ortools>=9.7
+# --- graph model -------------------------------------------------------------
+networkx>=3.0,<4            # verified 3.6.1
 
-# Quantum-style optimization (runs locally, no API key)
-dwave-neal>=0.6.0
-dimod>=0.12
+# --- constrained optimization ------------------------------------------------
+ortools>=9.7,<10            # verified 9.15.6755
 
-# Graph + network
-networkx>=3.0
+# --- data / ML ---------------------------------------------------------------
+numpy>=1.24,<3              # verified 2.3.2
+pandas>=2.0,<3              # verified 2.3.1
+scikit-learn>=1.3,<2        # verified 1.8.0
 
-# URL feature extraction (used by existing https-detector)
-tldextract>=3.4
-
-# API / demo serving
-fastapi>=0.100
-uvicorn>=0.23
-pydantic>=2.0
-
-# Visualization for plots saved to results/
-matplotlib>=3.7
-
-# CLI niceness
-rich>=13.0
+# --- dashboard server --------------------------------------------------------
+fastapi>=0.100,<1           # verified 0.136.1
+uvicorn>=0.23,<1            # verified 0.46.0

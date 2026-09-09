@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amcds"
+version = "2.0.0"
+description = "Autonomous Multi-Agent Cyber Defense System — business-aware containment via multi-agent negotiation and CP-SAT optimization"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+    "networkx>=3.0,<4",
+    "ortools>=9.7,<10",
+    "numpy>=1.24,<3",
+    "pandas>=2.0,<3",
+    "scikit-learn>=1.3,<2",
+    "fastapi>=0.100,<1",
+    "uvicorn>=0.23,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4,<10"]
+annealing = ["dwave-neal>=0.6,<1", "dimod>=0.12,<1"]
+
+[project.scripts]
+amcds-demo = "run_demo:main"
+
+[tool.setuptools]
+packages = [
+    "amcds",
+    "amcds.agents",
+    "amcds.attack",
+    "amcds.detection",
+    "amcds.evaluation",
+    "amcds.events",
+    "amcds.ml",
+    "amcds.negotiation",
+    "amcds.network",
+    "amcds.optimization",
+    "amcds.scenarios",
+    "amcds.telemetry",
+    "amcds.utils",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore:.*class-based `config` is deprecated.*:DeprecationWarning",
+]

@@ -24,6 +24,10 @@ Thumbs.db
 results/*.json
 results/*.png
 !results/.gitkeep
+# Committed evidence for the numbers quoted in the docs. The full reports
+# (results/benchmark.json, results/demo_report.json) stay untracked because they
+# carry every per-scenario row and are hundreds of kilobytes.
+!results/benchmark_summary.json
 data/*.csv
 !data/sample_*.csv
 *.log
@@ -42,3 +46,7 @@ _bmad/
 _bmad-output/
 .agent/
 push_to_github.sh
+
+# Personal study material — kept outside the repository on purpose.
+docs/AMCDS_INTERVIEW_PREP.md
+AMCDS-private/
