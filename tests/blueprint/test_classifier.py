@@ -1,4 +1,14 @@
 """Tests for Attack Classifier."""
+
+# These tests cover the *distributed blueprint* tree (agents/, simulation/,
+# attack_engine/), which is a specification rather than part of the runnable
+# AMCDS prototype in amcds/. It has optional third-party dependencies, so the
+# module is skipped rather than failing collection when they are absent.
+# The prototype's own suite lives in tests/amcds/.
+import pytest
+
+pytest.importorskip("torch", reason="blueprint-tree dependency not installed")
+
 import pytest
 import numpy as np
 
