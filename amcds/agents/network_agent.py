@@ -1,125 +1,142 @@
-"""Network Agent — focuses on lateral-movement containment.
+"""Network Agent — lateral-movement containment.
 
-Uses the existing https-detector model (when present) to inspect any URLs
-mentioned in IOC evidence, and proposes isolating hosts within `blast_radius`
-hops of confirmed infected hosts.
+Domain
+------
+Cutting the attacker's routes. It works from the trust-weighted attack surface
+(``plausible_attack_surface``) rather than a hop count, and it explicitly
+measures what an isolation *buys*: for every candidate host it asks NetworkX how
+much of the reachable surface disappears if that host is cut.
+
+That measurement is also its critique weapon. A host that is on nobody's attack
+path and whose removal shrinks the surface by zero is, from this agent's point
+of view, pure business cost for no containment value — so it objects. That is the
+main counterweight to the Data and Endpoint agents, which tend to over-propose.
 """
 from __future__ import annotations
 
-import logging
-import os
-import sys
-import warnings
-from typing import Set
+from typing import Dict, List, Set
 
-from .base_agent import BaseAgent, AgentProposal
-from ..network.topology import NetworkTopology
+from ..config import MIN_PATH_TRUST
+from .base_agent import AgentProposal, BaseAgent, Critique, NegotiationContext
 
-# Silence the noisy "version mismatch on pickle" + "can't refresh public suffix
-# list" output when we lazy-load the existing https-detector.
-warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
-logging.getLogger("tldextract").setLevel(logging.CRITICAL)
-logging.getLogger("filelock").setLevel(logging.CRITICAL)
-
-_URL_DETECTOR = None
-_DETECTOR_LOAD_TRIED = False
-
-
-def _try_load_url_detector():
-    """Lazily import the existing https-detector if the trained model exists."""
-    global _URL_DETECTOR, _DETECTOR_LOAD_TRIED
-    if _URL_DETECTOR is not None or _DETECTOR_LOAD_TRIED:
-        return _URL_DETECTOR
-    _DETECTOR_LOAD_TRIED = True
-    try:
-        # Add https-detector/src to sys.path so we can import its inference module
-        here = os.path.dirname(os.path.abspath(__file__))
-        # amcds/agents -> AMCDS root
-        repo_root = os.path.abspath(os.path.join(here, "..", ".."))
-        detector_src = os.path.join(repo_root, "https-detector", "src")
-        model_path = os.path.join(detector_src, "model.pkl")
-        if not os.path.exists(model_path):
-            return None
-        if detector_src not in sys.path:
-            sys.path.insert(0, detector_src)
-        # Importing inference triggers tldextract to try to refresh the public
-        # suffix list. We swallow stderr during that import so the demo log is
-        # clean even on machines with no internet.
-        import io
-        import contextlib
-        with contextlib.redirect_stderr(io.StringIO()), \
-             contextlib.redirect_stdout(io.StringIO()):
-            from inference import URLThreatDetector  # type: ignore
-            _URL_DETECTOR = URLThreatDetector(model_dir=detector_src)
-        return _URL_DETECTOR
-    except Exception:
-        return None
+#: Hosts reachable with at least this path trust are treated as genuinely
+#: exposed and are candidates for pre-emptive isolation.
+EXPOSURE_TRUST = 0.25
 
 
 class NetworkAgent(BaseAgent):
     name = "Network"
 
-    def __init__(self, blast_radius: int = 1) -> None:
-        self.blast_radius = blast_radius
+    def __init__(self, exposure_trust: float = EXPOSURE_TRUST,
+                 max_hops: int = 2) -> None:
+        self.exposure_trust = exposure_trust
+        self.max_hops = max_hops
 
-    def propose(self, topology: NetworkTopology, scenario: dict) -> AgentProposal:
-        infected: Set[str] = set(scenario.get("infected_hosts", []))
-        attack_type = scenario.get("attack_type", "unknown")
-        suspicious_urls = scenario.get("ioc_evidence", {}).get("urls", [])
+    # ------------------------------------------------------------------ propose
+    def propose(self, ctx: NegotiationContext) -> AgentProposal:
+        t = ctx.topology
+        isolate: Set[str] = set(ctx.confirmed)
+        justification: Dict[str, str] = {
+            h: "confirmed compromised — an active foothold on the network"
+            for h in sorted(ctx.confirmed)
+        }
 
-        # URL inspection (uses the existing https-detector model if trained)
-        url_findings = []
-        detector = _try_load_url_detector()
-        if detector and suspicious_urls:
-            for url in suspicious_urls[:10]:
-                try:
-                    is_mal, conf, _ = detector.predict(url)
-                    if is_mal and conf > 0.6:
-                        url_findings.append((url, conf))
-                except Exception:
-                    pass
+        if not ctx.confirmed:
+            return AgentProposal(
+                agent_name=self.name, isolate=isolate, justification=justification,
+                reasoning="no host has hard evidence; no containment cut proposed.",
+                confidence=0.3)
 
-        # Lateral-movement containment: isolate everything within `blast_radius` hops.
-        # For ransomware we go aggressive (radius=2); for insider threats, radius=1.
-        radius = 2 if attack_type == "ransomware" else self.blast_radius
-        isolate: Set[str] = set(infected)
-        frontier = set(infected)
-        for _ in range(radius):
-            nxt = set()
-            for h in frontier:
-                for nbr in topology.neighbors(h):
-                    if nbr not in isolate:
-                        # Don't blanket-isolate DCs — that kills identity org-wide
-                        if topology.hosts[nbr].host_type != "domain_controller":
-                            nxt.add(nbr)
-            isolate.update(nxt)
-            frontier = nxt
+        probs = t.attack_path_probabilities(sorted(ctx.confirmed))
+        within = t.within_hops(sorted(ctx.confirmed), self.max_hops)
+        centrality = t.centrality()
 
-        # If URL evidence is strong, also flag any host whose name suggests it
-        # served those URLs (web tier).
-        web_concerns = set()
-        if url_findings:
-            for hid, host in topology.hosts.items():
-                if host.host_type == "web_server":
-                    web_concerns.add(hid)
-            isolate.update(web_concerns)
+        # A host is worth cutting when the attacker can plausibly reach it AND
+        # cutting it actually shrinks the reachable surface.
+        exposed = sorted(h for h in within
+                         if h not in ctx.confirmed
+                         and probs.get(h, 0.0) >= self.exposure_trust)
+        for h in exposed:
+            value = t.containment_value([h], sorted(ctx.confirmed))
+            protects = len(value["hosts_protected"])
+            central = centrality.get(h, 0.0)
+            if protects > 0 or central >= 0.05 or h in ctx.suspected:
+                isolate.add(h)
+                justification[h] = (
+                    f"reachable at path trust {probs.get(h, 0.0):.2f}; cutting it "
+                    f"protects {protects} downstream host(s), betweenness "
+                    f"{central:.3f}")
 
+        surface = t.plausible_attack_surface(sorted(ctx.confirmed), MIN_PATH_TRUST)
+        value = t.containment_value(isolate, sorted(ctx.confirmed))
         reasoning = (
-            f"Lateral-movement containment at radius={radius} from "
-            f"{len(infected)} infected host(s) → isolate {len(isolate)} host(s). "
-        )
-        if url_findings:
-            reasoning += (
-                f"URL detector flagged {len(url_findings)} malicious URL(s) "
-                f"(top confidence {max(c for _, c in url_findings):.2f}); "
-                f"adding {len(web_concerns)} web-tier host(s) to isolation set. "
-            )
-        elif suspicious_urls and not detector:
-            reasoning += "(URL detector not trained — skipping URL inspection.) "
+            f"Attacker on {len(ctx.confirmed)} confirmed host(s) can plausibly reach "
+            f"{len(surface)} host(s) (path trust >= {MIN_PATH_TRUST}). Proposed cut of "
+            f"{len(isolate)} host(s) shrinks that surface by "
+            f"{value['reduction_pct']:.0f}% "
+            f"({value['surface_before']} -> {value['surface_after']}).")
 
         return AgentProposal(
-            agent_name=self.name,
-            isolate=isolate,
+            agent_name=self.name, isolate=isolate, justification=justification,
             reasoning=reasoning,
-            confidence=0.85 if infected else 0.4,
+            confidence=0.85 if ctx.confirmed else 0.4,
         )
+
+    # ----------------------------------------------------------------- critique
+    def critique(self, ctx: NegotiationContext,
+                 proposals: Dict[str, AgentProposal]) -> List[Critique]:
+        t = ctx.topology
+        confirmed = sorted(ctx.confirmed)
+        probs = t.attack_path_probabilities(confirmed) if confirmed else {}
+        out: List[Critique] = []
+
+        for other in sorted(proposals):
+            if other == self.name:
+                continue
+            p = proposals[other]
+            c = Critique(agent_name=self.name, target_agent=other)
+
+            for h in sorted(p.isolate):
+                if h in ctx.confirmed:
+                    c.endorsements[h] = "confirmed foothold — cutting it is mandatory"
+                    continue
+                reach = probs.get(h, 0.0)
+                if reach < MIN_PATH_TRUST:
+                    c.objections[h] = (
+                        f"the attacker cannot plausibly reach this host "
+                        f"(best path trust {reach:.3f} < {MIN_PATH_TRUST}); "
+                        f"isolating it buys no containment")
+                    continue
+                value = t.containment_value([h], confirmed)
+                if not value["hosts_protected"] and reach < self.exposure_trust:
+                    c.objections[h] = (
+                        f"cutting it protects no downstream host and it is only "
+                        f"weakly reachable (trust {reach:.2f})")
+                else:
+                    c.endorsements[h] = (
+                        f"reachable at trust {reach:.2f}; cut protects "
+                        f"{len(value['hosts_protected'])} host(s)")
+
+            # Additions: high-value cut points the proposal missed.
+            if confirmed:
+                for h in sorted(set(probs) - p.isolate - set(confirmed)):
+                    if probs[h] < 0.5:
+                        continue
+                    value = t.containment_value([h], confirmed)
+                    if len(value["hosts_protected"]) >= 3:
+                        c.additions[h] = (
+                            f"choke point: reachable at trust {probs[h]:.2f} and "
+                            f"cutting it shields "
+                            f"{len(value['hosts_protected'])} host(s)")
+
+            c.summary = ("no containment objection" if c.satisfied else
+                         f"{len(c.objections)} host(s) with no containment value, "
+                         f"{len(c.additions)} missed choke point(s)")
+            out.append(c)
+        return out
+
+    def _accepts_addition(self, ctx: NegotiationContext, host: str) -> bool:
+        if ctx.has_hard_evidence(host):
+            return True
+        probs = ctx.topology.attack_path_probabilities(sorted(ctx.confirmed))
+        return probs.get(host, 0.0) >= self.exposure_trust

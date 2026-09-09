@@ -1,3 +1,3 @@
-from .protocol import NegotiationProtocol, NegotiationLog
+from .protocol import HostVote, NegotiationLog, NegotiationProtocol
 
-__all__ = ["NegotiationProtocol", "NegotiationLog"]
+__all__ = ["HostVote", "NegotiationLog", "NegotiationProtocol"]
