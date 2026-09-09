@@ -1,195 +1,237 @@
-"""Evaluation harness — compare AMCDS against two automated baselines.
+"""Reproducible benchmark: AMCDS against baselines and against itself.
 
-Baselines
----------
-AGGRESSIVE:    isolate every host within 3 hops of any infected host.
-               (Standard SOAR playbook; security-first, ignores business cost.)
-CONSERVATIVE:  isolate only confirmed infected hosts.
-               (Wait-and-see; business-first, ignores risk.)
-AMCDS:         5-agent negotiation + classical solver (or quantum on demand).
+Strategies compared
+-------------------
+``AGGRESSIVE_3HOP``   isolate every host within 3 network hops of any host with
+                      hard evidence. The classic blanket SOAR playbook and the
+                      baseline the headline reduction is measured against.
+``AGGRESSIVE_2HOP``   the same idea with a tighter radius — a fairer, stronger
+                      version of the blanket approach.
+``CONSERVATIVE``      isolate only hosts with hard evidence. Business-first.
+``RISK_THRESHOLD``    isolate every host whose ML risk score clears the
+                      suspicious threshold. This is the **ML-only ablation**: no
+                      agents, no negotiation, no optimizer. It answers "does the
+                      multi-agent layer add anything over just running the model?"
+``AMCDS_NO_ML``       the full pipeline with the risk model switched off, so the
+                      agents see signature alerts only. The **agent-only ablation**.
+``AMCDS``             the full pipeline.
+``AMCDS_ANNEALING``   the full pipeline with the QUBO annealer replacing CP-SAT
+                      (optional; measures what a metaheuristic costs).
 
-Metrics
--------
-- residual_risk          : # hosts in ground_truth_spread NOT in isolated set
-                           (lower is better)
-- unnecessary_isolation  : # hosts isolated that were NOT in ground_truth_spread
-                           (lower is better)
-- revenue_impact         : ₹/hour of services taken down
-- sla_breaches           : # gold-tier services broken
-- response_time_seconds  : wall-clock for negotiation + solver
+Fairness
+--------
+Every strategy — baselines included — sees exactly the same observable inputs:
+hosts with hard evidence and, where applicable, the ML risk scores. None of them
+gets the ground-truth compromised set. The original harness handed the aggressive
+baseline the true infected list, which made the comparison meaningless.
 """
 from __future__ import annotations
 
 import json
 import os
-import statistics
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Set
+from typing import Callable, Dict, List, Optional, Sequence, Set
 
-from ..agents import (
-    BusinessImpactAgent,
-    DataAgent,
-    EndpointAgent,
-    IdentityAgent,
-    NetworkAgent,
-)
-from ..negotiation import NegotiationProtocol
+from ..attack.propagation import PropagationModel
+from ..config import ML_SUSPICIOUS_THRESHOLD
+from ..ml.risk_model import HostRiskModel
 from ..network.topology import NetworkTopology
-from ..optimization import ClassicalSolver, QuantumSolver
-from ..scenarios import AttackScenario
+from ..optimization.annealing_solver import AnnealingSolver
+from ..pipeline import AMCDSPipeline
+from ..scenarios.generator import AttackScenario
+from .metrics import ScenarioResult, aggregate, score
 
-
-@dataclass
-class ScenarioResult:
-    scenario_id: str
-    attack_type: str
-    strategy: str
-    isolated: List[str] = field(default_factory=list)
-    residual_risk: int = 0
-    unnecessary_isolation: int = 0
-    revenue_impact: float = 0.0
-    sla_breaches: List[str] = field(default_factory=list)
-    response_time_seconds: float = 0.0
-
-    def to_dict(self) -> dict:
-        return self.__dict__.copy()
-
-
-def _aggressive_baseline(topology: NetworkTopology,
-                         scenario: AttackScenario) -> Set[str]:
-    isolate = set(scenario.infected_hosts)
-    frontier = set(scenario.infected_hosts)
-    for _ in range(3):
-        nxt = set()
-        for h in frontier:
-            for nbr in topology.neighbors(h):
-                if nbr not in isolate:
-                    nxt.add(nbr)
-        isolate.update(nxt)
-        frontier = nxt
-    return isolate
-
-
-def _conservative_baseline(topology: NetworkTopology,
-                           scenario: AttackScenario) -> Set[str]:
-    return set(scenario.infected_hosts)
-
-
-def _amcds(topology: NetworkTopology, scenario: AttackScenario,
-           use_quantum: bool = False) -> Set[str]:
-    agents = [IdentityAgent(), NetworkAgent(),
-              DataAgent(), EndpointAgent()]
-    biz = BusinessImpactAgent()
-    protocol = NegotiationProtocol(agents, biz)
-
-    log = protocol.run(topology, scenario.to_dict())
-    candidates = log.final_isolate
-
-    solver = QuantumSolver() if use_quantum else ClassicalSolver()
-    result = solver.solve(topology, candidates, set(scenario.infected_hosts))
-    return result["isolate"]
-
-
-def _metrics(topology: NetworkTopology, scenario: AttackScenario,
-             isolated: Set[str], strategy: str,
-             response_time: float) -> ScenarioResult:
-    ground_truth = set(scenario.ground_truth_spread) | set(scenario.infected_hosts)
-    residual = ground_truth - isolated
-    unnecessary = isolated - ground_truth
-    revenue = topology.revenue_impact_of_isolating(isolated)
-    breaches = topology.sla_breaches(isolated)
-
-    return ScenarioResult(
-        scenario_id=scenario.scenario_id,
-        attack_type=scenario.attack_type,
-        strategy=strategy,
-        isolated=sorted(isolated),
-        residual_risk=len(residual),
-        unnecessary_isolation=len(unnecessary),
-        revenue_impact=revenue,
-        sla_breaches=breaches,
-        response_time_seconds=response_time,
-    )
+#: Order matters only for presentation.
+BASELINE_STRATEGIES = ("AGGRESSIVE_3HOP", "AGGRESSIVE_2HOP", "CONSERVATIVE",
+                       "RISK_THRESHOLD")
+AMCDS_STRATEGIES = ("AMCDS_NO_ML", "AMCDS")
 
 
 class EvaluationHarness:
-    def __init__(self, topology: NetworkTopology) -> None:
-        self.topology = topology
+    """Runs every strategy over every scenario and aggregates the results."""
 
-    def run(self, scenarios: List[AttackScenario], *,
-            include_quantum: bool = False,
-            quantum_sample: int = 10,
+    def __init__(self, topology: NetworkTopology,
+                 risk_model: Optional[HostRiskModel] = None) -> None:
+        self.topology = topology
+        self.risk_model = risk_model
+        self.propagation = PropagationModel(topology)
+        self.pipeline_ml = AMCDSPipeline(topology, risk_model, use_ml=True)
+        self.pipeline_no_ml = AMCDSPipeline(topology, risk_model, use_ml=False)
+        # Detection is shared infrastructure, not part of any one strategy, so it
+        # is computed once per scenario and cached. Otherwise every baseline
+        # would be charged for re-running the risk model and the reported
+        # runtimes would be meaningless.
+        self._assessment_cache: Dict[str, object] = {}
+        self._risk_cache: Dict[str, dict] = {}
+
+    # ------------------------------------------------------------- baselines
+    def _hop_baseline(self, scenario: AttackScenario, hops: int) -> Set[str]:
+        confirmed = self._confirmed(scenario)
+        if not confirmed:
+            return set()
+        return self.topology.within_hops(sorted(confirmed), hops)
+
+    def _conservative(self, scenario: AttackScenario) -> Set[str]:
+        return self._confirmed(scenario)
+
+    def _risk_threshold(self, scenario: AttackScenario) -> Set[str]:
+        confirmed = self._confirmed(scenario)
+        if self.risk_model is None:
+            return confirmed
+        risks = self._risk_cache.get(scenario.scenario_id)
+        if risks is None:
+            risks = self.risk_model.score(scenario.telemetry, self.topology)
+            self._risk_cache[scenario.scenario_id] = risks
+        flagged = {h for h, r in risks.items()
+                   if r.risk_score >= ML_SUSPICIOUS_THRESHOLD}
+        return flagged | confirmed
+
+    def _confirmed(self, scenario: AttackScenario) -> Set[str]:
+        """Hosts with hard evidence — the only thing a baseline may key on."""
+        assessment = self._assessment_cache.get(scenario.scenario_id)
+        if assessment is None:
+            assessment = self.pipeline_ml.assess(scenario)
+            self._assessment_cache[scenario.scenario_id] = assessment
+        return assessment.confirmed_infected()
+
+    def prewarm(self, scenario: AttackScenario) -> None:
+        """Populate the detection caches before any strategy is timed."""
+        self._confirmed(scenario)
+        self._risk_threshold(scenario)
+
+    # ------------------------------------------------------------------- run
+    def run(self, scenarios: Sequence[AttackScenario], *,
+            include_annealing: bool = False,
+            annealing_sample: int = 10,
             verbose: bool = True) -> Dict:
-        all_results: List[ScenarioResult] = []
+        results: List[ScenarioResult] = []
+        traces: List[dict] = []
+
+        strategies: Dict[str, Callable[[AttackScenario], Set[str]]] = {
+            "AGGRESSIVE_3HOP": lambda sc: self._hop_baseline(sc, 3),
+            "AGGRESSIVE_2HOP": lambda sc: self._hop_baseline(sc, 2),
+            "CONSERVATIVE": self._conservative,
+            "RISK_THRESHOLD": self._risk_threshold,
+        }
 
         for i, sc in enumerate(scenarios):
-            if verbose and i % 20 == 0:
-                print(f"  scenario {i+1}/{len(scenarios)}  ({sc.scenario_id})")
+            if verbose and (i % 10 == 0 or i == len(scenarios) - 1):
+                print(f"    scenario {i+1}/{len(scenarios)}  {sc.scenario_id} "
+                      f"({sc.attack_type})", flush=True)
 
-            # AGGRESSIVE
-            t0 = time.time()
-            agg = _aggressive_baseline(self.topology, sc)
-            all_results.append(_metrics(self.topology, sc, agg,
-                                        "AGGRESSIVE", time.time() - t0))
+            self.prewarm(sc)
+            for name, fn in strategies.items():
+                t0 = time.perf_counter()
+                plan = fn(sc)
+                results.append(score(self.topology, self.propagation, sc, plan,
+                                     name, time.perf_counter() - t0))
 
-            # CONSERVATIVE
-            t0 = time.time()
-            cons = _conservative_baseline(self.topology, sc)
-            all_results.append(_metrics(self.topology, sc, cons,
-                                        "CONSERVATIVE", time.time() - t0))
+            decision_no_ml = self.pipeline_no_ml.run(sc)
+            results.append(score(self.topology, self.propagation, sc,
+                                 decision_no_ml.isolate, "AMCDS_NO_ML",
+                                 decision_no_ml.runtime_seconds))
 
-            # AMCDS (classical)
-            t0 = time.time()
-            amc = _amcds(self.topology, sc, use_quantum=False)
-            all_results.append(_metrics(self.topology, sc, amc,
-                                        "AMCDS_CLASSICAL", time.time() - t0))
+            decision = self.pipeline_ml.run(sc)
+            results.append(score(self.topology, self.propagation, sc,
+                                 decision.isolate, "AMCDS",
+                                 decision.runtime_seconds))
+            traces.append(decision.summary())
 
-            # AMCDS (quantum) — only on a sample to keep runtime reasonable
-            if include_quantum and i < quantum_sample:
-                t0 = time.time()
-                amc_q = _amcds(self.topology, sc, use_quantum=True)
-                all_results.append(_metrics(self.topology, sc, amc_q,
-                                            "AMCDS_QUANTUM", time.time() - t0))
+            if include_annealing and i < annealing_sample:
+                t0 = time.perf_counter()
+                plan = self._annealing_plan(decision)
+                results.append(score(self.topology, self.propagation, sc, plan,
+                                     "AMCDS_ANNEALING", time.perf_counter() - t0))
 
-        return self._summarize(all_results)
+        return self._report(results, traces, scenarios)
 
-    # ------------------------------------------------------- summary
-    def _summarize(self, results: List[ScenarioResult]) -> Dict:
+    def _annealing_plan(self, decision) -> Set[str]:
+        confirmed = sorted(decision.assessment.confirmed_infected())
+        reach = (self.topology.attack_path_probabilities(confirmed)
+                 if confirmed else {})
+        out = AnnealingSolver().solve(
+            self.topology, decision.negotiation.final_isolate, confirmed,
+            reach=reach, risk_scores=decision.assessment.risk_scores())
+        return set(out["isolate"])
+
+    # -------------------------------------------------------------- reporting
+    def _report(self, results: Sequence[ScenarioResult], traces: List[dict],
+                scenarios: Sequence[AttackScenario]) -> Dict:
         by_strategy: Dict[str, List[ScenarioResult]] = {}
         for r in results:
             by_strategy.setdefault(r.strategy, []).append(r)
 
-        summary = {}
-        for strat, rs in by_strategy.items():
-            summary[strat] = {
-                "n_scenarios": len(rs),
-                "avg_residual_risk": statistics.mean(r.residual_risk for r in rs),
-                "avg_unnecessary_isolation": statistics.mean(r.unnecessary_isolation for r in rs),
-                "avg_revenue_impact": statistics.mean(r.revenue_impact for r in rs),
-                "avg_sla_breaches": statistics.mean(len(r.sla_breaches) for r in rs),
-                "avg_response_time_seconds": statistics.mean(r.response_time_seconds for r in rs),
-                "total_sla_breaches": sum(len(r.sla_breaches) for r in rs),
-                "avg_isolated_hosts": statistics.mean(len(r.isolated) for r in rs),
-            }
+        summary = {name: aggregate(rs) for name, rs in sorted(by_strategy.items())}
 
-        # Headline: % reduction in unnecessary isolation vs AGGRESSIVE
-        if "AGGRESSIVE" in summary and "AMCDS_CLASSICAL" in summary:
-            agg = summary["AGGRESSIVE"]["avg_unnecessary_isolation"]
-            amc = summary["AMCDS_CLASSICAL"]["avg_unnecessary_isolation"]
-            if agg > 0:
-                summary["_headline"] = {
-                    "unnecessary_isolation_reduction_vs_aggressive_pct":
-                        round((agg - amc) / agg * 100, 1),
-                }
+        # Per-attack-type breakdown for AMCDS, so a weak category cannot hide
+        # inside the average.
+        by_type: Dict[str, Dict[str, dict]] = {}
+        for name, rs in sorted(by_strategy.items()):
+            for attack_type in sorted({r.attack_type for r in rs}):
+                subset = [r for r in rs if r.attack_type == attack_type]
+                by_type.setdefault(attack_type, {})[name] = aggregate(subset)
+
+        headline = {}
+        for baseline in BASELINE_STRATEGIES:
+            if baseline not in summary or "AMCDS" not in summary:
+                continue
+            b = summary[baseline]["avg_unnecessary_shutdown"]
+            a = summary["AMCDS"]["avg_unnecessary_shutdown"]
+            headline[f"unnecessary_shutdown_reduction_vs_{baseline}_pct"] = (
+                round((b - a) / b * 100, 1) if b > 0 else None)
+        if "AMCDS_NO_ML" in summary and "AMCDS" in summary:
+            b = summary["AMCDS_NO_ML"]["avg_unnecessary_shutdown"]
+            a = summary["AMCDS"]["avg_unnecessary_shutdown"]
+            headline["unnecessary_shutdown_reduction_vs_AMCDS_NO_ML_pct"] = (
+                round((b - a) / b * 100, 1) if b > 0 else None)
 
         return {
+            "config": {
+                "n_scenarios": len(scenarios),
+                "scenarios_by_type": {
+                    t: sum(1 for s in scenarios if s.attack_type == t)
+                    for t in sorted({s.attack_type for s in scenarios})},
+                "topology": self.topology.summary(),
+                "ml_enabled": self.risk_model is not None,
+                "risk_threshold": ML_SUSPICIOUS_THRESHOLD,
+            },
             "summary": summary,
+            "by_attack_type": by_type,
+            "headline": headline,
+            "amcds_decisions": traces,
             "results": [r.to_dict() for r in results],
         }
 
+    # ------------------------------------------------------------------- io
     @staticmethod
     def save(report: Dict, path: str) -> None:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
             json.dump(report, f, indent=2, default=str)
+
+    @staticmethod
+    def print_summary(report: Dict) -> None:
+        order = list(BASELINE_STRATEGIES) + list(AMCDS_STRATEGIES) + ["AMCDS_ANNEALING"]
+        rows = [s for s in order if s in report["summary"]]
+        header = (f"  {'strategy':<18}{'unnec':>7}{'missed':>8}{'isolated':>10}"
+                  f"{'prec':>7}{'recall':>8}{'F1':>7}{'INR L/hr':>10}"
+                  f"{'SLA':>6}{'contain':>9}{'ms':>8}")
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for s in rows:
+            m = report["summary"][s]
+            print(f"  {s:<18}"
+                  f"{m['avg_unnecessary_shutdown']:>7.2f}"
+                  f"{m['avg_missed_threat']:>8.2f}"
+                  f"{m['avg_n_isolated']:>10.2f}"
+                  f"{m['micro_precision']:>7.3f}"
+                  f"{m['micro_recall']:>8.3f}"
+                  f"{m['micro_f1']:>7.3f}"
+                  f"{m['avg_revenue_impact']/1e5:>10.1f}"
+                  f"{m['avg_n_sla_breaches']:>6.2f}"
+                  f"{m['containment_rate']:>9.2f}"
+                  f"{m['avg_runtime_seconds']*1000:>8.1f}")
+        print()
+        for k, v in sorted(report["headline"].items()):
+            if v is not None:
+                print(f"  {k}: {v}%")

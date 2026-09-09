@@ -1,30 +1,28 @@
 """Cinematic event timeline for the live dashboard.
 
-The simulation pipeline (negotiation + solver) is fast — milliseconds — so the
-raw event stream is too fast for humans to follow. This module re-paces the
-events into a 15-25 second timeline suitable for live demos, with each event
-stamped at a virtual `t` (milliseconds from scenario start).
+The pipeline runs in tens of milliseconds, which is unwatchable. This module
+re-paces one :class:`~amcds.pipeline.ContainmentDecision` into a 15-25 second
+sequence of timestamped events that the browser replays locally, so scrubbing
+and pausing cost nothing.
 
-The dashboard replays this timeline at the chosen speed (0.5×, 1×, 2×, 4×)
-without any further server round-trips.
-
-Event shape
------------
-Each event is a dict ``{t: int_ms, type: str, data: dict}``.
+Event shape: ``{"t": milliseconds, "type": str, "data": {...}}``.
 
 Event types
 -----------
-ATTACK_DETECTED        — initial alarm; banner fires on dashboard
-HOST_INFECTED          — a host turns red on the network map
-INFECTION_TENDRIL      — animated red pulse along an edge (visual flavor)
-PHASE_BANNER           — text banner above the network map
-AGENT_PROPOSAL         — a specialist agent's reasoning + isolate set
-AGENT_CRITIQUE         — critique from one agent on the joint candidate
-BUSINESS_VETO          — Business Impact Agent removes hosts from the set
-SOLVER_RUNNING         — optimizer engaged (with candidate count)
-SOLVER_RESULT          — classical (and optionally quantum) result
-HOST_ISOLATED          — a host visually quarantined, edges dimmed
-CONTAINMENT_COMPLETE   — final summary banner
+``ATTACK_DETECTED``      initial alarm
+``RISK_SCORED``          the ML layer's verdict on the estate
+``HOST_INFECTED``        a host with hard evidence turns red
+``HOST_SUSPECT``         a host the model flagged turns amber
+``PHASE_BANNER``         phase title above the network map
+``AGENT_PROPOSAL``       one agent's isolation set and reasoning
+``AGENT_CRITIQUE``       one agent's objections to a peer's proposal
+``AGENT_COUNTER``        what an agent conceded or adopted
+``BUSINESS_VETO``        the formal veto decision
+``CONSENSUS_VOTE``       the weighted resolution of a contested host
+``SOLVER_RUNNING``       CP-SAT engaged
+``SOLVER_RESULT``        the optimal plan
+``HOST_ISOLATED``        a host is quarantined
+``CONTAINMENT_COMPLETE`` final summary
 """
 from __future__ import annotations
 
@@ -32,195 +30,217 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 
 class TimelineEvent(TypedDict):
-    t: int         # milliseconds from t=0
+    t: int
     type: str
     data: Dict[str, Any]
 
 
-# Pacing constants (tunable for demo feel).
-T_INITIAL_PAUSE        = 800      # before banner
-T_PER_INFECTED_HOST    = 350      # delay between each initial infected host
-T_BEFORE_AGENTS        = 1400
-T_PER_AGENT_PROPOSAL   = 750
-T_BETWEEN_PHASES       = 900
-T_PER_CRITIQUE         = 450
-T_BEFORE_VETO          = 700
-T_BEFORE_SOLVER        = 1100
-T_SOLVER_THINKING      = 1300
-T_BEFORE_CONTAINMENT   = 700
-T_PER_ISOLATION        = 220
-T_FINAL_PAUSE          = 1000
+# Pacing constants (milliseconds), tuned for demo feel.
+T_INITIAL_PAUSE = 700
+T_RISK_SCORING = 900
+T_PER_INFECTED_HOST = 280
+T_PER_SUSPECT_HOST = 120
+T_BEFORE_AGENTS = 1100
+T_PER_AGENT_PROPOSAL = 700
+T_BETWEEN_PHASES = 800
+T_PER_CRITIQUE = 320
+T_PER_COUNTER = 380
+T_BEFORE_VETO = 700
+T_PER_VOTE = 300
+T_BEFORE_SOLVER = 900
+T_SOLVER_THINKING = 1200
+T_BEFORE_CONTAINMENT = 600
+T_PER_ISOLATION = 200
+T_FINAL_PAUSE = 900
+
+AGENT_ORDER = ["Identity", "Network", "Data", "Endpoint", "BusinessImpact"]
 
 
-def build_timeline(scenario: dict,
-                   negotiation_log: dict,
-                   classical_result: dict,
-                   quantum_result: Optional[dict] = None,
-                   topology_summary: Optional[dict] = None) -> List[TimelineEvent]:
-    """Build a paced replay timeline for one scenario.
-
-    Parameters
-    ----------
-    scenario : dict
-        AttackScenario.to_dict() — has infected_hosts, attack_type,
-        ground_truth_spread, etc.
-    negotiation_log : dict
-        NegotiationLog.to_dict() — has phases array.
-    classical_result : dict
-        ClassicalSolver.solve() return — has isolate set + runtime.
-    quantum_result : dict, optional
-        QuantumSolver.solve() return.
-    topology_summary : dict, optional
-        Currently unused; reserved for future enrichment.
-
-    Returns
-    -------
-    list[TimelineEvent]
-        Ordered list of timed events. Last event's `t` is the total duration.
-    """
+def build_timeline(decision, scenario) -> List[TimelineEvent]:
+    """Build the replay timeline for one :class:`ContainmentDecision`."""
     events: List[TimelineEvent] = []
     t = 0
+    log = decision.negotiation
+    assessment = decision.assessment
+    confirmed = sorted(assessment.confirmed_infected())
+    suspected = sorted(assessment.suspected())
 
-    # ---- 0. ATTACK DETECTED --------------------------------------------------
-    events.append({"t": t, "type": "ATTACK_DETECTED", "data": {
-        "scenario_id": scenario["scenario_id"],
-        "attack_type": scenario["attack_type"],
-        "infected": list(scenario["infected_hosts"]),
-        "elapsed_min": scenario["elapsed_minutes"],
-        "ground_truth_spread_count": len(scenario.get("ground_truth_spread", [])),
-    }})
+    def emit(kind: str, data: dict) -> None:
+        events.append({"t": t, "type": kind, "data": data})
+
+    # ---- 0. attack detected -------------------------------------------------
+    emit("ATTACK_DETECTED", {
+        "scenario_id": decision.scenario_id,
+        "attack_type": decision.attack_type,
+        "elapsed_min": assessment.elapsed_minutes,
+        "n_alerts": sum(len(a.evidence) for a in assessment.hosts.values()),
+        "confirmed": confirmed,
+        "suspected": suspected,
+        "blast_radius": {k: v for k, v in decision.blast_before.items()
+                         if k not in ("_per_host", "hosts_at_risk")},
+    })
     t += T_INITIAL_PAUSE
 
-    # ---- 1. INITIAL INFECTED HOSTS BECOME VISIBLE ---------------------------
-    for h in scenario["infected_hosts"]:
-        events.append({"t": t, "type": "HOST_INFECTED", "data": {"host": h}})
+    # ---- 1. ML risk scoring -------------------------------------------------
+    if decision.ml_enabled:
+        top = sorted(
+            ((h, a.risk_score) for h, a in assessment.hosts.items()
+             if a.risk_score is not None),
+            key=lambda kv: (-kv[1], kv[0]))[:6]
+        emit("RISK_SCORED", {
+            "ml_enabled": True,
+            "top_risk": [{"host": h, "risk": round(r, 3),
+                          "why": assessment.hosts[h].why()} for h, r in top],
+            "scores": {h: round(a.risk_score, 3)
+                       for h, a in sorted(assessment.hosts.items())
+                       if a.risk_score is not None},
+        })
+        t += T_RISK_SCORING
+
+    # ---- 2. hosts light up --------------------------------------------------
+    for h in confirmed:
+        emit("HOST_INFECTED", {"host": h, "why": assessment.hosts[h].why()})
         t += T_PER_INFECTED_HOST
+    for h in suspected:
+        emit("HOST_SUSPECT", {"host": h,
+                              "risk": assessment.hosts[h].risk_score,
+                              "why": assessment.hosts[h].why()})
+        t += T_PER_SUSPECT_HOST
 
-    # ---- 2. PHASE BANNER: agents analyzing ----------------------------------
+    # ---- 3. PROPOSE ---------------------------------------------------------
     t += T_BEFORE_AGENTS // 2
-    events.append({"t": t, "type": "PHASE_BANNER", "data": {
-        "text": "Specialist Agents Analyzing",
-        "subtext": f"{len(scenario.get('ground_truth_spread', []))} hosts at risk if no action",
-    }})
+    emit("PHASE_BANNER", {
+        "text": "Phase 1 — Propose",
+        "subtext": f"{decision.blast_before.get('n_hosts_at_risk', 0)} hosts in the "
+                   f"blast radius if nothing is done",
+    })
     t += T_BEFORE_AGENTS // 2
+    for name in AGENT_ORDER:
+        p = log.proposals.get(name)
+        if p is None:
+            continue
+        emit("AGENT_PROPOSAL", {
+            "agent": name,
+            "isolate": sorted(p.isolate),
+            "reasoning": p.reasoning,
+            "confidence": round(p.confidence, 3),
+        })
+        t += T_PER_AGENT_PROPOSAL
 
-    # ---- 3. PHASE 1: PROPOSALS ----------------------------------------------
-    proposal_phase = next((p for p in negotiation_log["phases"]
-                          if p["phase"] == "PROPOSAL"), None)
-    if proposal_phase:
-        # We emit one event per agent, in a stable order so the side panel
-        # lights up Identity → Network → Data → Endpoint → BusinessImpact.
-        agent_order = ["Identity", "Network", "Data", "Endpoint", "BusinessImpact"]
-        for name in agent_order:
-            p = proposal_phase["proposals"].get(name)
-            if not p:
-                continue
-            events.append({"t": t, "type": "AGENT_PROPOSAL", "data": {
-                "agent": name,
-                "isolate": list(p["isolate"]),
-                "reasoning": p["reasoning"],
-                "confidence": float(p["confidence"]),
-            }})
-            t += T_PER_AGENT_PROPOSAL
+    # ---- 4. CRITIQUE --------------------------------------------------------
+    t += T_BETWEEN_PHASES // 2
+    critique_phase = log.phase("CRITIQUE")
+    emit("PHASE_BANNER", {
+        "text": "Phase 2 — Critique",
+        "subtext": f"{critique_phase.get('n_objections', 0)} objection(s) across "
+                   f"{critique_phase.get('n_critiques', 0)} peer reviews",
+    })
+    t += T_BETWEEN_PHASES // 2
+    for c in log.critiques:
+        if c.satisfied:
+            continue
+        emit("AGENT_CRITIQUE", {
+            "agent": c.agent_name,
+            "target": c.target_agent,
+            "objections": {h: c.objections[h] for h in sorted(c.objections)},
+            "additions": sorted(c.additions),
+            "summary": c.summary,
+        })
+        t += T_PER_CRITIQUE
 
-    # ---- 4. PHASE 2: CRITIQUE -----------------------------------------------
-    critique_phase = next((p for p in negotiation_log["phases"]
-                          if p["phase"] == "CRITIQUE"), None)
-    if critique_phase:
-        t += T_BETWEEN_PHASES // 2
-        events.append({"t": t, "type": "PHASE_BANNER", "data": {
-            "text": "Cross-Agent Critique",
-        }})
-        t += T_BETWEEN_PHASES // 2
-        for name in ["Identity", "Network", "Data", "Endpoint"]:
-            c = critique_phase["critiques"].get(name)
-            if not c:
-                continue
-            events.append({"t": t, "type": "AGENT_CRITIQUE", "data": {
-                "agent": name,
-                "satisfied": bool(c["satisfied"]),
-                "concerns": c["concerns"],
-            }})
-            t += T_PER_CRITIQUE
+    # ---- 5. COUNTER ---------------------------------------------------------
+    counter_phase = log.phase("COUNTER")
+    t += T_BETWEEN_PHASES // 2
+    emit("PHASE_BANNER", {
+        "text": "Phase 3 — Counter",
+        "subtext": f"{counter_phase.get('total_conceded', 0)} host(s) conceded, "
+                   f"{counter_phase.get('total_adopted', 0)} adopted",
+    })
+    t += T_BETWEEN_PHASES // 2
+    for name in AGENT_ORDER:
+        move = counter_phase.get("moves", {}).get(name)
+        if not move or not (move["conceded"] or move["adopted"]):
+            continue
+        emit("AGENT_COUNTER", {
+            "agent": name,
+            "conceded": move["conceded"],
+            "adopted": move["adopted"],
+            "n_before": move["n_before"],
+            "n_after": move["n_after"],
+        })
+        t += T_PER_COUNTER
 
-    # ---- 5. PHASE 3: COUNTER ------------------------------------------------
-    counter_phase = next((p for p in negotiation_log["phases"]
-                         if p["phase"] == "COUNTER"), None)
-    if counter_phase:
-        t += T_BETWEEN_PHASES // 2
-        events.append({"t": t, "type": "PHASE_BANNER", "data": {
-            "text": "Counter-Proposals Merged",
-            "subtext": f"{len(counter_phase['joint_after_counter'])} hosts in joint set",
-        }})
-        t += T_BETWEEN_PHASES // 2
+    # ---- 6. VETO ------------------------------------------------------------
+    t += T_BEFORE_VETO
+    emit("PHASE_BANNER", {"text": "Phase 4 — Business Impact Veto"})
+    t += T_BEFORE_VETO // 2
+    veto = log.veto
+    emit("BUSINESS_VETO", {
+        "vetoed": {h: veto.vetoed[h] for h in sorted(veto.vetoed)} if veto else {},
+        "overridden": ({h: veto.overridden[h] for h in sorted(veto.overridden)}
+                       if veto else {}),
+        "summary": veto.summary if veto else "",
+    })
+    t += T_BEFORE_VETO
 
-    # ---- 6. PHASE 4: BUSINESS VETO ------------------------------------------
-    veto_phase = next((p for p in negotiation_log["phases"]
-                      if p["phase"] == "BUSINESS_VETO"), None)
-    if veto_phase:
-        t += T_BEFORE_VETO
-        events.append({"t": t, "type": "PHASE_BANNER", "data": {
-            "text": "Business Impact Review",
-        }})
-        t += T_BEFORE_VETO // 2
-        events.append({"t": t, "type": "BUSINESS_VETO", "data": {
-            "satisfied": bool(veto_phase["satisfied"]),
-            "concerns": veto_phase["concerns"],
-            "vetoed": list(veto_phase.get("vetoed_hosts", [])),
-            "joint_after_veto": list(veto_phase.get("joint_after_veto", [])),
-        }})
-        t += T_BEFORE_VETO
+    # ---- 7. CONSENSUS -------------------------------------------------------
+    t += T_BETWEEN_PHASES // 2
+    consensus = log.phase("CONSENSUS")
+    emit("PHASE_BANNER", {
+        "text": "Phase 5 — Consensus",
+        "subtext": f"{consensus.get('n_contested', 0)} contested host(s); "
+                   f"agreement {log.agreement:.2f}",
+    })
+    t += T_BETWEEN_PHASES // 2
+    for host in sorted(log.votes):
+        v = log.votes[host]
+        if not v.contested:
+            continue
+        emit("CONSENSUS_VOTE", {
+            "host": host,
+            "supporters": sorted(v.supporters),
+            "objectors": sorted(v.objectors),
+            "support_ratio": round(v.support_ratio, 3),
+            "kept": v.kept,
+        })
+        t += T_PER_VOTE
 
-    # ---- 7. PHASE 5: SOLVER -------------------------------------------------
-    candidate_set = negotiation_log.get("final_isolate", [])
-    if isinstance(candidate_set, set):
-        candidate_set = sorted(candidate_set)
+    # ---- 8. optimizer -------------------------------------------------------
     t += T_BEFORE_SOLVER // 2
-    events.append({"t": t, "type": "PHASE_BANNER", "data": {
-        "text": "Optimizer Engaged",
-        "subtext": f"{len(candidate_set)} candidate hosts",
-    }})
-    t += T_BEFORE_SOLVER // 2
-    events.append({"t": t, "type": "SOLVER_RUNNING", "data": {
-        "candidate_count": len(candidate_set),
-        "candidates": list(candidate_set),
-    }})
+    candidates = sorted(log.final_isolate)
+    emit("SOLVER_RUNNING", {
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "constraints": decision.solver_result.get("constraints", []),
+    })
     t += T_SOLVER_THINKING
+    emit("SOLVER_RESULT", {
+        "isolate": sorted(decision.isolate),
+        "dropped": decision.solver_result.get("dropped", []),
+        "runtime_ms": round(decision.solver_result.get("runtime_seconds", 0.0) * 1000, 2),
+        "objective": decision.solver_result.get("objective"),
+        "status": decision.solver_result.get("status"),
+        "solver": decision.solver_result.get("solver"),
+        "explanation": decision.solver_result.get("explanation", ""),
+        "business_cost_per_hour": decision.solver_result.get("business_cost_per_hour", 0.0),
+        "sla_breaches": decision.solver_result.get("sla_breaches", []),
+    })
 
-    quantum_payload = None
-    if quantum_result is not None:
-        quantum_payload = {
-            "isolate": sorted(list(quantum_result["isolate"])),
-            "runtime_ms": float(quantum_result["runtime_seconds"]) * 1000,
-            "solver": quantum_result.get("solver", "quantum"),
-        }
-    events.append({"t": t, "type": "SOLVER_RESULT", "data": {
-        "isolate": sorted(list(classical_result["isolate"])),
-        "runtime_ms": float(classical_result["runtime_seconds"]) * 1000,
-        "objective": classical_result.get("objective"),
-        "status": classical_result.get("status"),
-        "solver": classical_result.get("solver", "OR-Tools CP-SAT"),
-        "quantum": quantum_payload,
-    }})
-
-    # ---- 8. CONTAINMENT EXECUTING -------------------------------------------
+    # ---- 9. containment -----------------------------------------------------
     t += T_BEFORE_CONTAINMENT
-    events.append({"t": t, "type": "PHASE_BANNER", "data": {
-        "text": "Containment Executing",
-    }})
+    emit("PHASE_BANNER", {"text": "Containment Executing"})
     t += T_BEFORE_CONTAINMENT // 2
-
-    # Animate hosts being isolated one-by-one.
-    final_isolate = sorted(list(classical_result["isolate"]))
-    for h in final_isolate:
-        events.append({"t": t, "type": "HOST_ISOLATED", "data": {"host": h}})
+    for h in sorted(decision.isolate):
+        emit("HOST_ISOLATED", {"host": h,
+                               "why": decision.trace_host(h)["narrative"]})
         t += T_PER_ISOLATION
 
-    # ---- 9. CONTAINMENT COMPLETE --------------------------------------------
     t += T_FINAL_PAUSE
-    events.append({"t": t, "type": "CONTAINMENT_COMPLETE", "data": {
-        "n_isolated": len(final_isolate),
-        "scenario_id": scenario["scenario_id"],
-    }})
-
+    emit("CONTAINMENT_COMPLETE", {
+        "n_isolated": len(decision.isolate),
+        "scenario_id": decision.scenario_id,
+        "business_cost_per_hour": decision.solver_result.get("business_cost_per_hour", 0.0),
+        "sla_breaches": decision.solver_result.get("sla_breaches", []),
+        "containment": decision.containment,
+    })
     return events

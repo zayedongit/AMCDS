@@ -1,4 +1,5 @@
-from .classical_solver import ClassicalSolver
-from .quantum_solver import QuantumSolver
+from .cpsat_solver import CPSATSolver, ClassicalSolver, RISK_UNIT
+from .annealing_solver import AnnealingSolver, QuantumSolver, HAS_NEAL
 
-__all__ = ["ClassicalSolver", "QuantumSolver"]
+__all__ = ["CPSATSolver", "ClassicalSolver", "AnnealingSolver", "QuantumSolver",
+           "RISK_UNIT", "HAS_NEAL"]

@@ -12,11 +12,36 @@ def map_label(label_type):
     # 'benign' -> 0, anything else ('phishing', 'defacement', 'malware') -> 1
     return 0 if str(label_type).strip().lower() == 'benign' else 1
 
+DEFAULT_DATASET = "malicious_phish.csv"
+
+
+def resolve_dataset(explicit=None):
+    """Locate the training CSV without depending on any one machine's layout.
+
+    Order: an explicit argument, then $AMCDS_URL_DATASET, then the repository
+    root, then the current working directory.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(here, "..", ".."))
+    candidates = [
+        explicit,
+        os.environ.get("AMCDS_URL_DATASET"),
+        os.path.join(repo_root, DEFAULT_DATASET),
+        os.path.join(os.getcwd(), DEFAULT_DATASET),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
 def main():
-    data_path = '/Users/sahinaparween/Desktop/AMCDS/malicious_phish.csv'
-    
-    if not os.path.exists(data_path):
-        print(f"Dataset not found at {data_path}")
+    data_path = resolve_dataset(sys.argv[1] if len(sys.argv) > 1 else None)
+
+    if data_path is None:
+        print(f"Dataset not found. Place {DEFAULT_DATASET} in the repository "
+              f"root, set AMCDS_URL_DATASET, or pass the path as an argument.\n"
+              f"Source: https://www.kaggle.com/datasets/sid321axn/malicious-urls-dataset")
         sys.exit(1)
         
     print("Loading dataset...")

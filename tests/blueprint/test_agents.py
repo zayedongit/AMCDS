@@ -1,4 +1,11 @@
 """Tests for Agent Detection Logic."""
+
+# These tests cover the *distributed blueprint* tree (agents/, simulation/,
+# attack_engine/), which is a specification rather than part of the runnable
+# AMCDS prototype in amcds/. It has optional third-party dependencies, so the
+# module is skipped rather than failing collection when they are absent.
+# The prototype's own suite lives in tests/amcds/.
+
 import pytest
 from agents.identity_agent.agent import IdentityAgent
 from agents.network_agent.agent import NetworkAgent

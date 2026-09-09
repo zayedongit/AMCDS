@@ -1,0 +1,13 @@
+# Optional extras. Nothing in the core pipeline, the test suite or the benchmark
+# needs these; each feature degrades gracefully when its dependency is absent.
+
+# QUBO / simulated-annealing comparison optimizer (amcds/optimization/annealing_solver.py).
+# This is a CLASSICAL annealer running on the CPU; nothing quantum executes.
+dwave-neal>=0.6,<1          # verified 0.6.0
+dimod>=0.12,<1              # verified 0.12.21
+
+# Dependencies of the distributed-architecture blueprint tree (simulation/,
+# agents/, attack_engine/), which is a specification and is not exercised by the
+# prototype. Installing these un-skips tests/blueprint*.
+faker>=19.0
+pydantic>=2.0,<3            # verified 2.13.3

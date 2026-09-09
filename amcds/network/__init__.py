@@ -1,3 +1,12 @@
-from .topology import NetworkTopology, build_sample_enterprise
+from .topology import NetworkTopology, HostNode
+from .builder import (build_segmented_enterprise, build_sample_enterprise,
+                      workstations, servers)
 
-__all__ = ["NetworkTopology", "build_sample_enterprise"]
+__all__ = [
+    "NetworkTopology",
+    "HostNode",
+    "build_segmented_enterprise",
+    "build_sample_enterprise",
+    "workstations",
+    "servers",
+]

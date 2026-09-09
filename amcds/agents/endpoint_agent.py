@@ -1,60 +1,155 @@
-"""Endpoint Agent — focuses on EDR-style host-level signals.
+"""Endpoint Agent — host-level signals and the ML risk score.
 
-Heuristics:
-- High suspicion_score (set by EDR / scenario) → isolate.
-- Workstations with infected neighbors → quarantine workstation tier
-  (workstations are cheap to isolate and frequently malware-bearing).
+Domain
+------
+What each individual machine is doing. This is the agent that consumes the ML
+layer most directly: it reads the calibrated risk score produced by the
+IsolationForest and the peer-group z-scores that explain it.
+
+Position in the negotiation
+---------------------------
+It is the *evidence sceptic*. Its distinctive critique is aimed at proposals
+built from topology alone: if a host has no detector alert and a risk score
+below the suspicious threshold, then whatever the graph says, nothing on that
+machine looks wrong and the Endpoint agent objects to isolating it. This is the
+main mechanism by which the ML layer actually reduces unnecessary shutdowns —
+it gives an agent a principled reason to say "no".
+
+Running the pipeline with ``risk_score = None`` (the AMCDS_NO_ML ablation) blunts
+exactly this objection, which is how the benchmark isolates the ML contribution.
 """
 from __future__ import annotations
 
-from typing import Set
+from typing import Dict, List, Set
 
-from .base_agent import BaseAgent, AgentProposal
-from ..network.topology import NetworkTopology
+from ..config import ML_STRONG_THRESHOLD, ML_SUSPICIOUS_THRESHOLD
+from .base_agent import AgentProposal, BaseAgent, Critique, NegotiationContext
 
 
 class EndpointAgent(BaseAgent):
     name = "Endpoint"
 
-    def __init__(self, suspicion_threshold: float = 0.6) -> None:
-        self.suspicion_threshold = suspicion_threshold
+    def __init__(self, risk_threshold: float = ML_SUSPICIOUS_THRESHOLD,
+                 strong_threshold: float = ML_STRONG_THRESHOLD) -> None:
+        self.risk_threshold = risk_threshold
+        self.strong_threshold = strong_threshold
 
-    def propose(self, topology: NetworkTopology, scenario: dict) -> AgentProposal:
-        infected: Set[str] = set(scenario.get("infected_hosts", []))
-        host_suspicion = scenario.get("host_suspicion", {})  # {host_id: score}
+    # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _n_alerts(ctx: NegotiationContext, host: str) -> int:
+        a = ctx.assessment.hosts.get(host)
+        if a is None:
+            return 0
+        return sum(1 for e in a.evidence if e.ev_type.value != "ml_anomaly")
 
-        isolate: Set[str] = set(infected)
+    @staticmethod
+    def _ml_available(ctx: NegotiationContext) -> bool:
+        return any(a.risk_score is not None
+                   for a in ctx.assessment.hosts.values())
 
-        # 1) Anyone with EDR-reported high suspicion score
-        flagged_edr = set()
-        for hid, score in host_suspicion.items():
-            if score >= self.suspicion_threshold and hid in topology.hosts:
-                flagged_edr.add(hid)
-        isolate.update(flagged_edr)
+    def _quiet(self, ctx: NegotiationContext, host: str) -> bool:
+        """No detector alert and (if the ML layer is on) a low risk score."""
+        if self._n_alerts(ctx, host) > 0:
+            return False
+        a = ctx.assessment.hosts.get(host)
+        if a is None or a.risk_score is None:
+            return True
+        return a.risk_score < self.risk_threshold
 
-        # 2) Quarantine the workstation tier — cheap and likely vector
-        ws_with_infected_nbr = set()
-        for hid, host in topology.hosts.items():
-            if host.host_type != "workstation":
+    # ------------------------------------------------------------------ propose
+    def propose(self, ctx: NegotiationContext) -> AgentProposal:
+        isolate: Set[str] = set(ctx.confirmed)
+        justification: Dict[str, str] = {}
+        for h in sorted(ctx.confirmed):
+            a = ctx.assessment.hosts[h]
+            justification[h] = f"hard evidence on the endpoint — {a.why()}"
+
+        n_ml_only = 0
+        for h in ctx.topology.host_ids():
+            if h in isolate:
                 continue
-            if hid in infected:
+            a = ctx.assessment.hosts.get(h)
+            if a is None:
                 continue
-            for nbr in topology.neighbors(hid):
-                if nbr in infected:
-                    ws_with_infected_nbr.add(hid)
-                    break
-        isolate.update(ws_with_infected_nbr)
+            risk = a.risk_score
+            if risk is not None and risk >= self.strong_threshold:
+                isolate.add(h)
+                justification[h] = f"endpoint behaviour strongly anomalous — {a.why()}"
+                n_ml_only += 1
+            elif (risk is not None and risk >= self.risk_threshold
+                  and self._n_alerts(ctx, h) >= 1):
+                isolate.add(h)
+                justification[h] = (
+                    f"risk {risk:.2f} above the {self.risk_threshold:.2f} threshold "
+                    f"and corroborated by {self._n_alerts(ctx, h)} detector alert(s)")
+                n_ml_only += 1
+            elif risk is None and a.infection_confidence() >= 0.5:
+                isolate.add(h)
+                justification[h] = (
+                    f"detector alerts combine to {a.infection_confidence():.2f} "
+                    f"confidence (no ML layer available)")
 
+        ml_note = ("ML risk model active" if self._ml_available(ctx)
+                   else "ML risk model DISABLED — signature alerts only")
         reasoning = (
-            f"EDR flagged {len(flagged_edr)} host(s) above suspicion threshold "
-            f"{self.suspicion_threshold:.2f}; "
-            f"{len(ws_with_infected_nbr)} workstation(s) adjacent to infection — "
-            f"recommend workstation-tier quarantine."
-        )
+            f"{ml_note}. {len(ctx.confirmed)} host(s) carry hard endpoint evidence; "
+            f"{n_ml_only} further host(s) are behaviourally anomalous above the "
+            f"{self.risk_threshold:.2f} risk threshold. Proposing "
+            f"{len(isolate)} host(s).")
 
         return AgentProposal(
-            agent_name=self.name,
-            isolate=isolate,
+            agent_name=self.name, isolate=isolate, justification=justification,
             reasoning=reasoning,
-            confidence=0.7,
+            confidence=0.8 if ctx.confirmed else 0.4,
         )
+
+    # ----------------------------------------------------------------- critique
+    def critique(self, ctx: NegotiationContext,
+                 proposals: Dict[str, AgentProposal]) -> List[Critique]:
+        out: List[Critique] = []
+        ml_on = self._ml_available(ctx)
+
+        for other in sorted(proposals):
+            if other == self.name:
+                continue
+            p = proposals[other]
+            c = Critique(agent_name=self.name, target_agent=other)
+
+            for h in sorted(p.isolate):
+                a = ctx.assessment.hosts.get(h)
+                if ctx.has_hard_evidence(h):
+                    c.endorsements[h] = "hard endpoint evidence"
+                    continue
+                if self._quiet(ctx, h):
+                    risk_txt = ("no ML score available" if a is None or a.risk_score is None
+                                else f"risk {a.risk_score:.2f} < {self.risk_threshold:.2f}")
+                    c.objections[h] = (
+                        f"nothing on this endpoint looks wrong: zero detector alerts, "
+                        f"{risk_txt}; isolating it is unnecessary downtime")
+                elif a is not None and a.risk_score is not None:
+                    c.endorsements[h] = (
+                        f"behaviourally anomalous (risk {a.risk_score:.2f})")
+
+            # Additions: hosts the model screams about that nobody proposed.
+            if ml_on:
+                for h in ctx.topology.host_ids():
+                    if h in p.isolate:
+                        continue
+                    a = ctx.assessment.hosts.get(h)
+                    if a is not None and a.risk_score is not None and \
+                            a.risk_score >= self.strong_threshold:
+                        c.additions[h] = (
+                            f"risk {a.risk_score:.2f} is in the top "
+                            f"{100*(1-self.strong_threshold):.0f}% most anomalous — "
+                            f"{a.why()}")
+
+            c.summary = ("no endpoint objection" if c.satisfied else
+                         f"{len(c.objections)} host(s) with no endpoint indicator, "
+                         f"{len(c.additions)} highly anomalous host(s) missed")
+            out.append(c)
+        return out
+
+    def _accepts_addition(self, ctx: NegotiationContext, host: str) -> bool:
+        if ctx.has_hard_evidence(host):
+            return True
+        return ctx.risk(host) >= self.risk_threshold

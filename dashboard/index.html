@@ -622,6 +622,7 @@ let data = null;
 let topology = null;
 let currentIdx = 0;
 let timeline = null;
+let riskScores = {};
 let simState = null;       // {infected:Set, isolated:Set, currentT:number}
 let playing = false;
 let playerStartReal = 0;
@@ -691,7 +692,8 @@ function loadScenario(idx) {
   const w = data.walkthrough[idx];
   timeline = w.timeline || [];
   processedIdx = 0;
-  simState = { infected: new Set(), isolated: new Set(), currentT: 0, scenario: w.scenario };
+  simState = { infected: new Set(), isolated: new Set(), suspect: new Set(), currentT: 0, scenario: w.scenario };
+  riskScores = {};
 
   document.getElementById('agentsCount').textContent = '5 standing by';
   document.getElementById('phaseLabel').textContent = 'awaiting attack';
@@ -718,10 +720,10 @@ function renderScenarioInfo(sc) {
   root.innerHTML = `
     <span class="lbl">Scenario</span>            <span class="val">${sc.scenario_id}</span>
     <span class="lbl">Attack type</span>         <span class="val">${sc.attack_type}</span>
-    <span class="lbl">Initial infected</span>    <span class="val">${sc.infected_hosts.join(', ')}</span>
-    <span class="lbl">Elapsed</span>             <span class="val">${sc.elapsed_minutes} min</span>
-    <span class="lbl">Spread if no action</span> <span class="val">${sc.ground_truth_spread.length} hosts</span>
-    <span class="lbl">Suspicious URLs</span>     <span class="val">${(sc.ioc_evidence.urls || []).length}</span>
+    <span class="lbl">Attack started on</span>   <span class="val">${(sc.seed_hosts||[]).join(', ')}</span>
+    <span class="lbl">Dwell time</span>          <span class="val">${sc.elapsed_minutes} min</span>
+    <span class="lbl">Detector alerts</span>     <span class="val">${sc.n_alerts != null ? sc.n_alerts : '—'}</span>
+    <span class="lbl">Ground truth spread</span> <span class="val">${(sc.ground_truth_compromised||[]).length} hosts <em style="color:#6b7a99">(evaluation only)</em></span>
   `;
 }
 
@@ -859,7 +861,17 @@ function renderNetwork() {
 
   nodeSel = nodeG;
 
+  // Clamp every node inside the drawing area. Without this the force layout
+  // pushes peripheral hosts (the database tier especially) past the bottom edge
+  // of the SVG, where their labels are cut off.
+  const PAD_X = 46, PAD_TOP = 22, PAD_BOTTOM = 34;   // room for the label below
+  function clamp(d) {
+    d.x = Math.max(PAD_X, Math.min(W - PAD_X, d.x));
+    d.y = Math.max(PAD_TOP, Math.min(H - PAD_BOTTOM, d.y));
+  }
+
   simulation.on('tick', () => {
+    hostsArr.forEach(clamp);
     linkSel
       .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
       .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
@@ -874,9 +886,12 @@ function renderNetwork() {
 function markHost(hostId, state) {
   const circle = document.querySelector(`circle[data-circle="${hostId}"]`);
   if (!circle) return;
-  circle.classList.remove('infected','isolated','healthy');
+  circle.classList.remove('infected','isolated','healthy','vetoed');
   circle.classList.add(state);
-  const colors = { infected: '#ff3860', isolated: '#ffc857', healthy: '#28e3a0' };
+  // 'vetoed' = the Business Impact agent blocked isolating this host, so it
+  // stays online. Shown in the protective blue rather than the isolation amber.
+  const colors = { infected: '#ff3860', isolated: '#ffc857',
+                   vetoed: '#5d7eff', healthy: '#28e3a0' };
   d3.select(circle).transition().duration(450)
     .attr('fill', colors[state] || colors.healthy)
     .attr('opacity', state === 'isolated' ? 0.45 : 1.0);
@@ -918,13 +933,28 @@ function applyEvent(ev) {
       document.getElementById('phaseLabel').textContent = 'attack detected';
       break;
     }
+    case 'RISK_SCORED': {
+      riskScores = ev.data.scores || {};
+      const top = (ev.data.top_risk || [])[0];
+      logEvent(T, `🧠 Anomaly model scored ${Object.keys(riskScores).length} hosts` +
+        (top ? ` — highest ${top.host} at risk ${top.risk.toFixed(2)}` : ''), 'agent');
+      (ev.data.top_risk || []).slice(0, 3).forEach(r =>
+        logEvent(T, `&nbsp;&nbsp;<em>${r.host}</em> ${r.why}`, 'agent'));
+      break;
+    }
     case 'HOST_INFECTED': {
       simState.infected.add(ev.data.host);
       markHost(ev.data.host, 'infected');
       pulse(ev.data.host, '#ff3860', 40);
-      logEvent(T, `host <em>${ev.data.host}</em> compromised`, 'attack');
+      logEvent(T, `host <em>${ev.data.host}</em> — hard evidence: ${ev.data.why}`, 'attack');
       setKPI('kpi-infected', simState.infected.size);
       flashKPI('kpiInfectedCard');
+      break;
+    }
+    case 'HOST_SUSPECT': {
+      simState.suspect.add(ev.data.host);
+      pulse(ev.data.host, '#ffc857', 22);
+      logEvent(T, `host <em>${ev.data.host}</em> suspected — ${ev.data.why}`, 'agent');
       break;
     }
     case 'PHASE_BANNER': {
@@ -941,32 +971,54 @@ function applyEvent(ev) {
       break;
     }
     case 'AGENT_CRITIQUE': {
-      const msg = ev.data.satisfied
-        ? `${AGENT_META[ev.data.agent].icon} ${ev.data.agent}: satisfied`
-        : `${AGENT_META[ev.data.agent].icon} ${ev.data.agent}: ⚠ ${ev.data.concerns.slice(0, 110)}`;
-      logEvent(T, msg, 'agent');
+      const icon = (AGENT_META[ev.data.agent] || {}).icon || '•';
+      const hosts = Object.keys(ev.data.objections || {});
+      logEvent(T, `${icon} <em>${ev.data.agent}</em> → ${ev.data.target}: ${ev.data.summary}`, 'agent');
+      hosts.slice(0, 2).forEach(h =>
+        logEvent(T, `&nbsp;&nbsp;objects to <em>${h}</em> — ${ev.data.objections[h]}`, 'agent'));
+      break;
+    }
+    case 'AGENT_COUNTER': {
+      const icon = (AGENT_META[ev.data.agent] || {}).icon || '•';
+      const bits = [];
+      if (ev.data.conceded.length) bits.push(`conceded ${ev.data.conceded.join(', ')}`);
+      if (ev.data.adopted.length) bits.push(`adopted ${ev.data.adopted.join(', ')}`);
+      logEvent(T, `${icon} <em>${ev.data.agent}</em> revises ${ev.data.n_before}→${ev.data.n_after}: ${bits.join('; ')}`, 'agent');
+      break;
+    }
+    case 'CONSENSUS_VOTE': {
+      logEvent(T,
+        `⚖ contested <em>${ev.data.host}</em> — support ${ev.data.supporters.join('/')} ` +
+        `vs objections ${ev.data.objectors.join('/')} → ratio ${ev.data.support_ratio.toFixed(2)} ` +
+        `→ <b>${ev.data.kept ? 'isolate' : 'spare'}</b>`, 'agent');
       break;
     }
     case 'BUSINESS_VETO': {
-      activateAgent('BusinessImpact', ev.data.concerns, 1.0, ev.data.vetoed);
-      if (ev.data.vetoed && ev.data.vetoed.length) {
-        logEvent(T, `💼 Business Impact VETO: ${ev.data.vetoed.join(', ')}`, 'veto');
-        ev.data.vetoed.forEach(h => pulse(h, '#ffc857', 32));
-      } else {
-        logEvent(T, `💼 Business Impact: ${ev.data.concerns}`, 'veto');
-      }
+      const vetoed = Object.keys(ev.data.vetoed || {});
+      const waived = Object.keys(ev.data.overridden || {});
+      activateAgent('BusinessImpact', ev.data.summary, 1.0, vetoed);
+      logEvent(T, `💼 ${ev.data.summary}`, 'veto');
+      vetoed.forEach(h => {
+        logEvent(T, `&nbsp;&nbsp;⛔ VETO <em>${h}</em> — ${ev.data.vetoed[h]}`, 'veto');
+        pulse(h, '#ffc857', 32);
+        markHost(h, 'vetoed');
+      });
+      waived.slice(0, 3).forEach(h =>
+        logEvent(T, `&nbsp;&nbsp;✓ veto waived on <em>${h}</em> — hard evidence`, 'veto'));
+      setKPI('kpi-vetoed', vetoed.length);
       break;
     }
     case 'SOLVER_RUNNING': {
-      logEvent(T, `⚡ Optimizer engaged — ${ev.data.candidate_count} candidate hosts`, 'solver');
+      logEvent(T, `⚡ CP-SAT engaged — ${ev.data.candidate_count} negotiated candidate(s)`, 'solver');
+      (ev.data.constraints || []).forEach(c => logEvent(T, `&nbsp;&nbsp;${c}`, 'solver'));
       setStatus('Optimizing containment', 'busy');
       break;
     }
     case 'SOLVER_RESULT': {
       const c = ev.data;
-      logEvent(T, `Classical (OR-Tools): ${c.isolate.length} hosts in ${c.runtime_ms.toFixed(0)}ms · objective ${c.objective != null ? Math.round(c.objective) : '—'}`, 'solver');
-      if (c.quantum) {
-        logEvent(T, `Quantum (D-Wave neal): ${c.quantum.isolate.length} hosts in ${c.quantum.runtime_ms.toFixed(0)}ms`, 'solver');
+      logEvent(T, `${c.solver}: ${c.status} — ${c.isolate.length} host(s) in ${c.runtime_ms.toFixed(1)}ms · objective ${c.objective != null ? Math.round(c.objective) : '—'}`, 'solver');
+      if (c.dropped && c.dropped.length) {
+        logEvent(T, `&nbsp;&nbsp;dropped ${c.dropped.join(', ')} — cost exceeded the risk removed`, 'solver');
       }
       break;
     }
@@ -976,6 +1028,7 @@ function applyEvent(ev) {
       dimEdges(ev.data.host);
       pulse(ev.data.host, '#ffc857', 28);
       logEvent(T, `→ quarantining <em>${ev.data.host}</em>`, 'isolate');
+      if (ev.data.why) logEvent(T, `&nbsp;&nbsp;<small>${ev.data.why}</small>`, 'isolate');
       setKPI('kpi-isolated', simState.isolated.size);
       flashKPI('kpiIsolatedCard');
       updateLiveCost();
@@ -985,25 +1038,38 @@ function applyEvent(ev) {
       logEvent(T, `✓ CONTAINMENT COMPLETE — ${ev.data.n_isolated} hosts isolated`, 'solver');
       setStatus('Contained — neutralized', 'normal');
       showPhaseBanner('✅ Containment Complete',
-        `${ev.data.n_isolated} hosts isolated · ${computeSLABreaches()} gold SLA breach(es)`,
+        `${ev.data.n_isolated} hosts isolated · ${(ev.data.sla_breaches||[]).length} gold SLA breach(es) · ` +
+        `attack surface ${(ev.data.containment||{}).surface_before ?? '—'} → ${(ev.data.containment||{}).surface_after ?? '—'}`,
         'success');
       document.getElementById('phaseLabel').textContent = 'contained';
       setKPI('kpi-sla', computeSLABreaches());
       flashKPI('kpiSlaCard');
+      updateLiveCost();   // also fires when zero hosts were isolated
       break;
     }
   }
 }
 
-function updateLiveCost() {
+// Hourly cost of the blanket 3-hop baseline, read from the benchmark rather
+// than hard-coded, so the saving shown is the one the benchmark actually
+// measured. Falls back to the measured 45-scenario mean if no benchmark is
+// present in the report.
+function aggressiveCostLakh() {
+  const m = data && data.benchmark && data.benchmark.summary
+    && data.benchmark.summary.AGGRESSIVE_3HOP;
+  return m ? m.avg_revenue_impact / 1e5 : 113.1;
+}
+
+function currentCostLakh() {
   let total = 0;
   for (const svc of Object.values(topology.services)) {
     if (svc.depends_on.some(h => simState.isolated.has(h))) total += svc.revenue_per_hour;
   }
-  // savings vs aggressive (~₹118.5L/hr typical)
-  const AGGRESSIVE_COST = 118.5;
-  const ourLakh = total / 1e5;
-  const saved = Math.max(0, AGGRESSIVE_COST - ourLakh);
+  return total / 1e5;
+}
+
+function updateLiveCost() {
+  const saved = Math.max(0, aggressiveCostLakh() - currentCostLakh());
   setKPI('kpi-saved', '₹' + saved.toFixed(1) + 'L');
   flashKPI('kpiSavedCard');
 }
@@ -1032,7 +1098,10 @@ function clearEventLog() {
   document.getElementById('eventLog').innerHTML = '';
 }
 
-function setKPI(id, val) { document.getElementById(id).textContent = val; }
+function setKPI(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
 function flashKPI(cardId) {
   const c = document.getElementById(cardId);
   c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash');
@@ -1103,43 +1172,47 @@ function tick() {
 function renderBenchmark(bench) {
   if (!bench || !bench.summary) return;
   const sum = bench.summary;
-  const strategies = ['AGGRESSIVE', 'CONSERVATIVE', 'AMCDS_CLASSICAL', 'AMCDS_QUANTUM']
-    .filter(s => sum[s]);
+  const strategies = ['AGGRESSIVE_3HOP', 'AGGRESSIVE_2HOP', 'CONSERVATIVE',
+                      'RISK_THRESHOLD', 'AMCDS_NO_ML', 'AMCDS'].filter(s => sum[s]);
   document.getElementById('benchN').textContent =
-    (sum[strategies[0]]?.n_scenarios || 0) + ' scenarios';
+    (sum[strategies[0]]?.n_scenarios || 0) + ' scenarios · 6 strategies';
 
-  // pick a winner: AMCDS_CLASSICAL by default, unless QUANTUM is strictly better.
-  let winner = 'AMCDS_CLASSICAL';
-  if (sum.AMCDS_QUANTUM && sum.AMCDS_CLASSICAL &&
-      sum.AMCDS_QUANTUM.avg_unnecessary_isolation < sum.AMCDS_CLASSICAL.avg_unnecessary_isolation &&
-      sum.AMCDS_QUANTUM.avg_sla_breaches <= sum.AMCDS_CLASSICAL.avg_sla_breaches) {
-    winner = 'AMCDS_QUANTUM';
-  }
+  // Highlight whichever strategy has the best micro-F1: the balance of
+  // catching compromised hosts against not shutting down clean ones.
+  let winner = strategies[0];
+  strategies.forEach(s => {
+    if ((sum[s].micro_f1 || 0) > (sum[winner].micro_f1 || 0)) winner = s;
+  });
 
   const root = document.getElementById('bench-strats');
   root.innerHTML = '';
   strategies.forEach(s => {
     const m = sum[s];
     const isWinner = (s === winner);
-    const isLoser = (s === 'AGGRESSIVE' || s === 'CONSERVATIVE');
+    const isLoser = s.startsWith('AGGRESSIVE') || s === 'CONSERVATIVE';
     const div = document.createElement('div');
     div.className = 'strat-card' + (isWinner ? ' winner' : '') + (isLoser ? ' loser' : '');
     div.innerHTML = `
-      <h4>${s.replace('_', ' ')}</h4>
-      <div class="strat-row"><span class="l">Unnecessary iso</span><span class="v">${m.avg_unnecessary_isolation.toFixed(2)}</span></div>
-      <div class="strat-row"><span class="l">Residual risk</span><span class="v">${m.avg_residual_risk.toFixed(2)}</span></div>
+      <h4>${s.replaceAll('_', ' ')}</h4>
+      <div class="strat-row"><span class="l">Unnecessary shutdown</span><span class="v">${m.avg_unnecessary_shutdown.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">Missed threats</span><span class="v">${m.avg_missed_threat.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">F1 (micro)</span><span class="v">${m.micro_f1.toFixed(3)}</span></div>
       <div class="strat-row"><span class="l">Cost / hr</span><span class="v">₹${(m.avg_revenue_impact/1e5).toFixed(1)}L</span></div>
-      <div class="strat-row"><span class="l">SLA breaches</span><span class="v">${m.avg_sla_breaches.toFixed(2)}</span></div>
-      <div class="strat-row"><span class="l">Response time</span><span class="v">${(m.avg_response_time_seconds*1000).toFixed(0)} ms</span></div>
+      <div class="strat-row"><span class="l">Gold SLA breaches</span><span class="v">${m.avg_n_sla_breaches.toFixed(2)}</span></div>
+      <div class="strat-row"><span class="l">Containment rate</span><span class="v">${(m.containment_rate*100).toFixed(0)}%</span></div>
+      <div class="strat-row"><span class="l">Decision time</span><span class="v">${(m.avg_runtime_seconds*1000).toFixed(1)} ms</span></div>
     `;
     root.appendChild(div);
   });
 
-  const head = sum._headline;
-  if (head) {
-    document.getElementById('benchHeadline').innerHTML =
-      `AMCDS reduces unnecessary isolation by <b>${head.unnecessary_isolation_reduction_vs_aggressive_pct}%</b> vs aggressive baseline`;
-  }
+  const head = bench.headline || {};
+  const vs3 = head.unnecessary_shutdown_reduction_vs_AGGRESSIVE_3HOP_pct;
+  const vsMl = head.unnecessary_shutdown_reduction_vs_RISK_THRESHOLD_pct;
+  const parts = [];
+  if (vs3 != null) parts.push(`<b>${vs3}%</b> fewer unnecessary shutdowns than the 3-hop blanket baseline`);
+  if (vsMl != null) parts.push(`<b>${vsMl}%</b> fewer than the anomaly model acting alone`);
+  document.getElementById('benchHeadline').innerHTML =
+    parts.length ? 'AMCDS: ' + parts.join(' · ') : '';
 
   // chart
   const ctx = document.getElementById('benchChart').getContext('2d');
@@ -1147,10 +1220,10 @@ function renderBenchmark(bench) {
   window._chart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: strategies.map(s => s.replace('_', ' ')),
+      labels: strategies.map(s => s.replaceAll('_', ' ')),
       datasets: [
-        { label: 'Unnecessary isolation', data: strategies.map(s => sum[s].avg_unnecessary_isolation), backgroundColor: '#ffc857' },
-        { label: 'Residual risk',         data: strategies.map(s => sum[s].avg_residual_risk),         backgroundColor: '#ff3860' },
+        { label: 'Unnecessary shutdowns', data: strategies.map(s => sum[s].avg_unnecessary_shutdown), backgroundColor: '#ffc857' },
+        { label: 'Missed threats',        data: strategies.map(s => sum[s].avg_missed_threat),        backgroundColor: '#ff3860' },
       ]
     },
     options: {
